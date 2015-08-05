@@ -1,0 +1,25 @@
+name:                et-cetera
+version:             0.1.0.0
+synopsis:            Inversible parsers for some *nix configuration files
+-- description:
+homepage:            github.com/paluh/et-cetera
+license:             BSD3
+license-file:        LICENSE
+author:              Tomasz Rybarczyk
+maintainer:          paluho@gmail.com
+-- copyright:
+category:            System
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+library
+  -- exposed-modules:
+  -- other-modules:
+  -- other-extensions:
+  build-depends:        base >=4.8 && <4.9
+                      , semigroups
+                      , boomerang
+                      , iproute
+  hs-source-dirs:      src
+  default-language:    Haskell2010
