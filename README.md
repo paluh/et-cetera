@@ -1,3 +1,3 @@
 # et-cetera
 
-Inversible parsers for some *nix configuration files
+Invertible parsers for some *nix configuration files
