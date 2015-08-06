@@ -16,10 +16,10 @@ import           Text.Boomerang.String (alpha, anyChar, char, digit, int, lit, S
 import           Text.Boomerang.HStack ((:-)(..))
 
 data Asquisition = DHCP | Manual | PPP | Static
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Protocol = Inet | Inet6
-  deriving (Read, Show)
+  deriving (Eq, Read, Show)
 
 capitalize :: String -> String
 capitalize [] = []
@@ -43,11 +43,14 @@ value = rList1 (digit <> alpha <> char '.' <> char '-')
 spaces :: StringBoomerang r r
 spaces = somel (lit " " <> lit "\t" <> lit "\\\n")
 
-eol :: StringBoomerang r r
-eol = lit "\n"
+indentation :: StringBoomerang r r
+indentation = somel (lit " " <> lit "\t") . opt spaces
+
+rEol :: StringBoomerang r r
+rEol = lit "\n"
 
 empty :: StringBoomerang r r
-empty = opt spaces . eol <> spaces
+empty = opt spaces . rEol <> spaces
 
 rProtocolB :: StringBoomerang r (Protocol :- r)
 rProtocolB =
@@ -69,31 +72,32 @@ rAsquisitionB = rAsquisition . (word "dhcp" <> word "manual" <> word "ppp" <> wo
 
 type Name = String
 data Stanza =
-    Iface Name Protocol Asquisition [RawOption] |
+    Iface Name Protocol Asquisition [RawIfaceOption] |
     Auto Name
-  deriving (Show)
+  deriving (Eq, Show)
 
-rInterface :: forall tok e r. Boomerang e tok (Name :- Protocol :- Asquisition :- [RawOption] :- r) (Stanza :- r)
+rInterface :: forall tok e r. Boomerang e tok (Name :- Protocol :- Asquisition :- [RawIfaceOption] :- r) (Stanza :- r)
 rInterface =
   xpure
     (arg (arg (arg (arg (:-)))) Iface)
     (\(Iface n p a o :- r) -> Just (n :- p :- a :- o :- r))
 
-data RawOption = RawOption String [String]
-  deriving (Show)
+data RawIfaceOption = RawIfaceOption String [String]
+  deriving (Eq, Show)
 
-rRawOption :: StringBoomerang (String :- [String] :- r) (RawOption :- r)
-rRawOption =
-  xpure
-    (arg (arg (:-)) RawOption)
-    (\(RawOption l as :- r) -> Just (l :- as :- r))
+rRawIfaceOption :: StringBoomerang r (RawIfaceOption :- r)
+rRawIfaceOption =
+  rRawIfaceOption' . indentation . label . rList1 (spaces . value)
+ where
+  rRawIfaceOption' :: StringBoomerang (String :- [String] :- r) (RawIfaceOption :- r)
+  rRawIfaceOption' =
+    xpure
+      (arg (arg (:-)) RawIfaceOption)
+      (\(RawIfaceOption l as :- r) -> Just (l :- as :- r))
 
-rRawOptionB :: StringBoomerang r (RawOption :- r)
-rRawOptionB =
-  rRawOption . spaces . label . rList1 (spaces . value)
 
-interfaceB :: StringBoomerang r (Stanza :- r)
-interfaceB =
+rIface :: StringBoomerang r (Stanza :- r)
+rIface =
   manyl empty .
   rInterface .
   lit "iface" .
@@ -103,7 +107,7 @@ interfaceB =
   rProtocolB .
   spaces .
   rAsquisitionB .
-  rList (eol . rRawOptionB)
+  rList (rEol . rRawIfaceOption)
 
 rIp4 :: forall tok e r. Boomerang e tok (Int :- Int :- Int :- Int :- r) (IP :- r)
 rIp4 = xpure
@@ -120,22 +124,16 @@ main :: IO ()
 main = do
   print $ unparseString ipB (IPv4 . toIPv4  $ [192, 168, 1, 100])
   print $ parseString (rListSep value spaces) "address 192.168.1.100"
-  print $ parseString rRawOptionB " address 192.168.1.100"
-  print $ parseString (rListSep rRawOptionB eol) " address 192.168.1.100\n dns-servers 8.8.8.8"
-  print $ parseString (rListSep rRawOptionB eol) " address 192.168.1.100\n dns-servers 8.8.8.8 4.4.4.4"
-  print $ parseString interfaceB ("iface eth0 inet dhcp\n" ++
-                                  "  address 192.168.1.100\n" ++
-                                  "  dns-servers 8.8.8.8 4.4.4.4")
   -- test \\n pattern
-  print $ parseString interfaceB ("iface eth0 inet \\\ndhcp\n" ++
+  print $ parseString rIface ("iface eth0 inet \\\ndhcp\n" ++
                                   "  address 192.168.1.100\n" ++
                                   "  dns-servers 8.8.8.8 4.4.4.4")
-  print $ unparseString interfaceB (Iface "eth0" Inet DHCP [])
-  putStrLn . fromMaybe "" $ unparseString interfaceB
-                              (Iface "eth0" Inet DHCP [RawOption "address" ["192.168.1.1"]])
+  print $ unparseString rIface (Iface "eth0" Inet DHCP [])
+  putStrLn . fromMaybe "" $ unparseString rIface
+                              (Iface "eth0" Inet DHCP [RawIfaceOption "address" ["192.168.1.1"]])
   putStrLn . fromMaybe "" $ unparseString (rListSep (char 'a') " ") "aaa"
-  putStrLn . fromMaybe "" $ unparseString interfaceB
+  putStrLn . fromMaybe "" $ unparseString rIface
                               (Iface "eth0" Inet DHCP
-                                [ RawOption "address" ["192.168.1.101"]
-                                , RawOption "dns-servers" ["8.8.8.8", "4.4.4.4"]
-                                , RawOption "network" ["192.168.1.100"]])
+                                [ RawIfaceOption "address" ["192.168.1.101"]
+                                , RawIfaceOption "dns-servers" ["8.8.8.8", "4.4.4.4"]
+                                , RawIfaceOption "network" ["192.168.1.100"]])
