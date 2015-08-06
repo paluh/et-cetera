@@ -124,16 +124,3 @@ main :: IO ()
 main = do
   print $ unparseString ipB (IPv4 . toIPv4  $ [192, 168, 1, 100])
   print $ parseString (rListSep value spaces) "address 192.168.1.100"
-  -- test \\n pattern
-  print $ parseString rIface ("iface eth0 inet \\\ndhcp\n" ++
-                                  "  address 192.168.1.100\n" ++
-                                  "  dns-servers 8.8.8.8 4.4.4.4")
-  print $ unparseString rIface (Iface "eth0" Inet DHCP [])
-  putStrLn . fromMaybe "" $ unparseString rIface
-                              (Iface "eth0" Inet DHCP [RawIfaceOption "address" ["192.168.1.1"]])
-  putStrLn . fromMaybe "" $ unparseString (rListSep (char 'a') " ") "aaa"
-  putStrLn . fromMaybe "" $ unparseString rIface
-                              (Iface "eth0" Inet DHCP
-                                [ RawIfaceOption "address" ["192.168.1.101"]
-                                , RawIfaceOption "dns-servers" ["8.8.8.8", "4.4.4.4"]
-                                , RawIfaceOption "network" ["192.168.1.100"]])
