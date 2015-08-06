@@ -1,3 +1,5 @@
 # et-cetera
 
-Invertible parsers for some *nix configuration files
+Experimental invertible parsers for some *nix configuration files
+
+Really early stage...

@@ -49,8 +49,8 @@ indentation = somel (lit " " <> lit "\t") . opt spaces
 rEol :: StringBoomerang r r
 rEol = lit "\n"
 
-empty :: StringBoomerang r r
-empty = opt spaces . rEol <> spaces
+rEmpty :: StringBoomerang r r
+rEmpty = opt spaces . rEol
 
 rProtocolB :: StringBoomerang r (Protocol :- r)
 rProtocolB =
@@ -98,7 +98,6 @@ rRawIfaceOption =
 
 rIface :: StringBoomerang r (Stanza :- r)
 rIface =
-  manyl empty .
   rInterface .
   lit "iface" .
   spaces .
@@ -107,7 +106,7 @@ rIface =
   rProtocolB .
   spaces .
   rAsquisitionB .
-  rList (rEol . rRawIfaceOption)
+  rList ((rEmpty <> rEol) . rRawIfaceOption)
 
 rIp4 :: forall tok e r. Boomerang e tok (Int :- Int :- Int :- Int :- r) (IP :- r)
 rIp4 = xpure
