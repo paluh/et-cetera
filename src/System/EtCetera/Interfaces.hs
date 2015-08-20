@@ -3,6 +3,8 @@
 {-# LANGUAGE RankNTypes #-}
 module System.EtCetera.Interfaces where
 
+-- check original parser: apt-get source netbase
+
 import           Prelude hiding ((.), id)
 import           Control.Category ((.))
 import           Data.Monoid ((<>))

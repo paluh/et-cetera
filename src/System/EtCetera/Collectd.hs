@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.Collectd where
 
@@ -7,13 +9,18 @@ module System.EtCetera.Collectd where
 
 import           Control.Category ((.))
 import           Data.Char (ord)
+import           Data.List (intersperse)
+import           Data.Maybe (listToMaybe)
 import           Data.Monoid ((<>))
 import           Numeric (showHex, showOct)
 import           Prelude hiding ((.), id)
-import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil, somel)
+import           Text.Boomerang.Combinators (duck1, manyl, opt, push, rCons, rList, rList1, rListSep,
+                                             rNil, somel, chainl, chainr)
 import           Text.Boomerang.HStack (arg, (:-)(..))
-import           Text.Boomerang.Prim (Boomerang, xpure)
-import           Text.Boomerang.String (alpha, anyChar, char, digit, lit, satisfy, StringBoomerang)
+import           Text.Boomerang.Prim (Boomerang, xmaph, xpure, runParser, prs)
+import           Text.Boomerang.Pos (initialPos)
+import           Text.Boomerang.String (alpha, anyChar, char, digit, lit, satisfy, StringBoomerang,
+                                        StringError)
 
 type Name = String
 type Arg = String
@@ -23,8 +30,8 @@ data Var = Var Name [Arg] [Var]
 oneOf :: String -> StringBoomerang r (Char :- r)
 oneOf l = satisfy (`elem` l)
 
-notAnyOf :: String -> StringBoomerang r (Char :- r)
-notAnyOf l = satisfy (not . (`elem` l))
+noneOf :: String -> StringBoomerang r (Char :- r)
+noneOf l = satisfy (not . (`elem` l))
 
 digitInRange :: Int -> Int -> StringBoomerang r (Char :- r)
 digitInRange s e = oneOf . concatMap show $ [s..e]
@@ -32,36 +39,58 @@ digitInRange s e = oneOf . concatMap show $ [s..e]
 alphaInRange :: Char -> Char -> StringBoomerang r (Char :- r)
 alphaInRange s e = oneOf . concatMap show $ [ord s..ord e]
 
-whiteSpace :: StringBoomerang r (Char :- r)
-whiteSpace = oneOf " \t\b"
+whiteSpace :: StringBoomerang r r
+whiteSpace = lit " " <> lit "\t" <> lit "\b"
 
 nonWhiteSpace :: StringBoomerang r (Char :- r)
-nonWhiteSpace = notAnyOf "\ \t\b"
+nonWhiteSpace = noneOf "\ \t\b"
 
 eol :: StringBoomerang r r
 eol = lit "\r\n" <> lit "\n"
 
-data QuotedStringPart = Escaped Char | Literal String
+data QuotedStringPart = Escaped String | Literal String
+  deriving (Eq, Show)
 type QuotedString = [QuotedStringPart]
 
-qCons :: QuotedStringPart -> QuotedString -> QuotedString
-qCons (Literal [c]) (Literal t : s) = Literal (c:t) : s
-qCons (Literal h) (Literal t : s) = Literal (h ++ t) : s
-qCons e s = e : s
+
+-- | Converts a router for a value @a@ to a router for a list of @a@, with a separator.
+rListSep' :: Boomerang e tok r (a :- r) -> Boomerang e tok ([a] :- r) ([a] :- r) -> Boomerang e tok r ([a] :- r)
+rListSep' r sep = chainl (rCons . duck1 r) sep . rNil
+
 
 quotedString :: StringBoomerang r (QuotedString :- r)
-quotedString = lit "\"" . rList1 (literal . rList1 (notAnyOf "\\\"") <> escaped . rCons . char '\\' . rCons . anyChar . rNil) . lit "\""
+quotedString =
+  lit "\"" .
+    ((opt (rCons . esc) . chrsEscRec) <>
+     (opt (rCons . chrs) . escChrsRec) <>
+     (rCons . esc . rNil) <>
+     (rCons . chrs . rNil)
+     ) .
+  lit "\""
  where
-  escaped = xpure
-          (arg (:-) (\[e, c] -> Escaped c))
-          (\e -> case e of
-                  (Escaped c :- r) -> Just (['\\', c] :- r)
-                  _ -> Nothing)
-  literal = xpure
-          (arg (:-) Literal)
-          (\e -> case e of
-                  (Literal s :- r) -> Just (s :- r)
-                  _ -> Nothing)
+  chrsEscRec :: StringBoomerang r (QuotedString :- r)
+  chrsEscRec = rCons . chrs . rCons . esc . (chrsEscRec <> rNil)
+
+  escChrsRec :: StringBoomerang r (QuotedString :- r)
+  escChrsRec = rCons . esc . rCons . chrs . (escChrsRec <> rNil)
+
+  chrs :: StringBoomerang r (QuotedStringPart :- r)
+  chrs =
+    xmaph Literal fromLiteral (rList1 (noneOf "\\\""))
+   where
+    fromLiteral qsp =
+      case qsp of
+        Literal s -> Just s
+        otherwise -> Nothing
+
+  esc :: StringBoomerang r (QuotedStringPart :- r)
+  esc =
+    xmaph Escaped fromEscaped (rList1 (lit "\\" . anyChar))
+   where
+    fromEscaped qsp =
+      case qsp of
+        Escaped s -> Just s
+        otherwise -> Nothing
 
 unquotedString :: StringBoomerang r (Value :- r)
 unquotedString = xpure (arg (:-) StringValue) (\(StringValue s :- r)-> Just (s :- r)) . rList1 (alpha <> digit)
@@ -137,14 +166,21 @@ unquote :: StringBoomerang (QuotedString :- r) (Value :- r)
 unquote = xpure (arg (:-) u) q
  where
   u = StringValue . concatMap u'
-  u' (Escaped c) = ['\\', c]
+  u' (Escaped s) = s
   u' (Literal s) = s
 
   q (StringValue s :- r) = Just (q' s :- r)
-  q' ('\\':r) = qCons (Escaped '\\') (q' r)
-  q' ('"':r) = qCons (Escaped '"') (q' r)
-  q' (c:r) = qCons (Literal [c]) (q' r)
+  q' []       = []
+  q' ('\\':r) = qCons (Escaped "\\") (q' r)
+  q' ('"':r)  = qCons (Escaped "\"") (q' r)
+  q' (c:r)    = qCons (Literal [c]) (q' r)
 
+  qCons :: QuotedStringPart -> QuotedString -> QuotedString
+  qCons (Literal [c]) (Literal t : s) = Literal (c:t) : s
+  qCons (Literal h) (Literal t : s) = Literal (h ++ t) : s
+  qCons (Escaped [c]) (Escaped t : s) = Escaped (c:t) : s
+  qCons (Escaped h) (Escaped t : s) = Escaped (h ++ t) : s
+  qCons e s = e : s
 
 string = unquotedString <> unquote . quotedString
 
@@ -158,10 +194,11 @@ argument :: StringBoomerang r (Value :- r)
 argument = string <> true <> false
 
 argumentList :: StringBoomerang r ([Value] :- r)
-argumentList = rCons . argument . argumentList <> rNil
+argumentList = rList1 (somel whiteSpace . argument)
 
 type Label = String
 data Option = Option Label [Value]
+  deriving (Eq, Show)
 
 option :: StringBoomerang r (Option :- r)
 option =
