@@ -162,6 +162,7 @@ true = push (BooleanValue True) . (lit "true" <> lit "yes" <> lit "on")
 false :: StringBoomerang r (Value :- r)
 false = push (BooleanValue False) . (lit "false" <> lit "no" <> lit "off")
 
+-- Dangerous parser - it scans all results of given parser for longest one
 parse1Partial :: Boomerang StringError String () (t :- ()) ->
                  String ->
                  MajorMinorPos ->
