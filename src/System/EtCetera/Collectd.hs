@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+
 module System.EtCetera.Collectd where
 
 -- Based directly on:
@@ -11,12 +12,14 @@ module System.EtCetera.Collectd where
 
 import           Control.Category ((.), id)
 import           Data.Char (ord)
+import           Data.Function (on)
 import           Data.List (intersperse)
 import           Data.Maybe (listToMaybe)
 import           Data.Monoid ((<>))
+import           Data.Ord (compare, Ordering(..))
 import           Numeric (showHex, showOct)
 import           Prelude hiding ((.), id)
-import           Text.Boomerang.Combinators (duck1, manyl, opt, push, rCons, rList, rList1, rListSep,
+import           Text.Boomerang.Combinators (duck1, manyl, manyr, opt, push, rCons, rList, rList1, rListSep,
                                              rNil, somel, chainl, chainr, rPair)
 import           Text.Boomerang.Error (condenseErrors, mkParserError, ErrorMsg(..))
 import           Text.Boomerang.HStack (arg, (:-)(..))
@@ -44,13 +47,13 @@ alphaInRange :: Char -> Char -> StringBoomerang r (Char :- r)
 alphaInRange s e = oneOf . concatMap show $ [ord s..ord e]
 
 whiteSpace :: StringBoomerang r r
-whiteSpace = lit " " <> lit "\t" <> lit "\b"
-
-nonWhiteSpace :: StringBoomerang r (Char :- r)
-nonWhiteSpace = noneOf "\ \t\b"
+whiteSpace = lit " " <> lit "\t" <> lit "\b" <> lit "\\\n" <> lit "\\\r\n"
 
 eol :: StringBoomerang r r
 eol = lit "\r\n" <> lit "\n"
+
+eolOrComment :: StringBoomerang r r
+eolOrComment = comment <> eol
 
 data QuotedStringPart = Escaped String | Literal String
   deriving (Eq, Show)
@@ -89,7 +92,7 @@ quotedString =
 
   esc :: StringBoomerang r (QuotedStringPart :- r)
   esc =
-    xmaph Escaped fromEscaped (rList1 (lit "\\" . anyChar))
+    xmaph Escaped fromEscaped (rList1 (lit "\\\n" . delete (rList1 (oneOf " \t")) . push '\t' <> lit "\\" . anyChar))
    where
     fromEscaped qsp =
       case qsp of
@@ -159,8 +162,44 @@ true = push (BooleanValue True) . (lit "true" <> lit "yes" <> lit "on")
 false :: StringBoomerang r (Value :- r)
 false = push (BooleanValue False) . (lit "false" <> lit "no" <> lit "off")
 
-comment :: StringBoomerang r (String :- r)
-comment = rCons . char '#' . rList anyChar . eol
+parse1Partial :: Boomerang StringError String () (t :- ()) ->
+                 String ->
+                 MajorMinorPos ->
+                 Either [StringError] ((t, String), MajorMinorPos)
+parse1Partial parser input position =
+  let rawResult = runParser (prs parser) input position
+      results = [either Left (\((f, t), p) -> Right ((f (), t), p)) r | r <- rawResult]
+  in case maximumByMay (compare `on` snd) [r | (Right r) <- results] of
+           (Just ((u :- (), t), p)) -> Right ((u, t), p)
+           _             -> Left $ bestErrors [ e | Left e <- results ]
+ where
+  -- version from Safe.Foldable returns last maximum from list
+  -- but we need first the first one
+  maximumByMay c = maximumByMay' c Nothing
+
+  maximumByMay' :: (a -> a -> Ordering) -> Maybe a -> [a] -> Maybe a
+  maximumByMay' _ r []     = r
+  maximumByMay' c Nothing (x:xs) = maximumByMay' c (Just x) xs
+  maximumByMay' c (Just r) (x:xs) =
+    if c x r == GT
+      then maximumByMay' c (Just x) xs
+      else maximumByMay' c (Just r) xs
+
+delete :: StringBoomerang () (a :- ()) -> StringBoomerang r r
+delete b =
+  Boomerang pf sf
+ where
+  pf =
+    Parser $ \tok pos ->
+      case parse1Partial b tok pos of
+        Right ((a, tok'), pos') -> [Right ((id, tok'), pos')]
+        Left e -> [Left . condenseErrors $ e]
+  sf r = [(id, r)]
+
+-- currently we are droping all comments
+comment :: StringBoomerang r r
+comment =
+  delete (manyl whiteSpace . rCons . char '#' . rList1 (noneOf "\n")) . eol
 
 identifier = unquotedString
 openBracket = char '<'
@@ -234,38 +273,28 @@ option :: StringBoomerang r (Option :- r)
 option =
   option' . identifier . argumentList . push []
 
-
 section :: StringBoomerang r (Option :- r)
 section =
-  Boomerang
-      (Parser $ \tok pos ->
-         case parse1Partial (rPair . section' . lit "</" . identifier . lit ">") tok pos of
-           Right (((opt@(Option label args opts), StringValue closingTag), tok'), pos') ->
-             if label == closingTag
-               then [Right ((\r -> opt :- r, tok'), pos')]
-               else mkParserError pos'
-                      [ Expect label
-                      , Message
-                          ("Closing tag (" ++
-                           closingTag ++
-                           ") should be the same as openning one (" ++
-                           label ++
-                           ")")
-                      ]
-           Left e -> [Left . condenseErrors $ e])
-      undefined
+  Boomerang pf sf
  where
-  parse1Partial :: Boomerang StringError String () (t :- ()) ->
-                   String ->
-                   MajorMinorPos ->
-                   Either [StringError] ((t, String), MajorMinorPos)
-  parse1Partial parser input position =
-      let rawResult = runParser (prs parser) input position
-          results = [either Left (\((f, t), p) -> Right ((f (), t), p)) r | r <- rawResult]
-      in case [r | (Right r) <- results] of
-               (((u :- (), t), p):_) -> Right ((u, t), p)
-               _             -> Left $ bestErrors [ e | Left e <- results ]
+  pf =
+    Parser $ \tok pos ->
+      case parse1Partial (rPair . section' . lit "</" . identifier . lit ">") tok pos of
+        Right (((opt@(Option label args opts), StringValue closingTag), tok'), pos') ->
+          if label == closingTag
+            then [Right ((\r -> opt :- r, tok'), pos')]
+            else mkParserError pos'
+              [ Expect label
+              , Message
+                  ("Closing tag (" ++
+                   closingTag ++
+                   ") should be the same as openning one (" ++
+                   label ++
+                   ")")
+              ]
+        Left e -> [Left . condenseErrors $ e]
+  sf = error "serilizer for section not implemented"
+  section' = option' . lit "<" . identifier . (argumentList <> push []) . lit ">" . eolOrComment . (options <> push [])
 
-  section' = option' . lit "<" . identifier . (argumentList <> push []) . lit ">" . eol . (options <> push [])
-
-options = rList1 ((section <> option) . eol)
+options :: Boomerang StringError String r ([Option] :- r)
+options = manyr eolOrComment . push [] <> rList1 ((manyl whiteSpace . (section <> option)) . somel eolOrComment)

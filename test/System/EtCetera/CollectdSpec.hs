@@ -6,10 +6,14 @@ module System.EtCetera.CollectdSpec where
 import           Control.Category ((.), id)
 import           Data.Maybe (listToMaybe)
 import           Prelude hiding ((.), id)
-import           System.EtCetera.Collectd (argumentList, section, number, floatNumber, option, Option(..), quotedString,
-                                           string, QuotedString, QuotedStringPart(..), Value(..))
-import           Text.Boomerang.Combinators (rList1)
-import           Text.Boomerang.String (unparseString, parseString, StringError)
+import           System.EtCetera.Collectd (argumentList, comment, section, number,
+                                           floatNumber, option, Option(..),
+                                           options, quotedString, string,
+                                           QuotedString, QuotedStringPart(..),
+                                           Value(..))
+import           Text.Boomerang.Combinators (push, rList1, rCons)
+import           Text.Boomerang.HStack ((:-)(..))
+import           Text.Boomerang.String (char, unparseString, parseString, StringError)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
 suite :: Spec
@@ -118,5 +122,44 @@ suite = do
     it "parses section with arguments and children" $
       parseString section "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8] []])
-
-
+    it "parses section with muliline children" $
+      parseString section "<Plugin arg1 1 2>\nChild1 2.8\\\n 8 9\n</Plugin>" `shouldBe`
+        (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $
+                                 [Option "Child1" [FloatValue 2.8, IntValue 8, IntValue 9] []])
+  describe "EtCetera.Collectd.comment boomerang" $ -- do
+    it "parses single comment" $
+      parseString (comment . push ()) "    #just comment\n" `shouldBe`
+        Right ()
+  describe "EtCetera.Collectd.options boomerang" $ do
+    it "parses single comment" $
+      parseString options "    #just comment\n" `shouldBe`
+        Right []
+    it "parses option ended with comment" $
+      parseString options "LoadPlugin cpu #some comment\n" `shouldBe`
+        Right [Option "LoadPlugin" [StringValue "cpu"] []]
+    it "parses options separated by comments" $
+      parseString options ("LoadPlugin cpu\n" ++
+                           "# first comment\n" ++
+                           "LoadPlugin load\n" ++
+                           "# second comment\n" ++
+                           "LoadPlugin ping\n") `shouldBe`
+        Right [ Option "LoadPlugin" [StringValue "cpu"] []
+              , Option "LoadPlugin" [StringValue "load"] []
+              , Option "LoadPlugin" [StringValue "ping"] []
+              ]
+    it "parses options and sections separated by comments" $
+      parseString options ("LoadPlugin cpu\n" ++
+                           "# first comment\n" ++
+                           "LoadPlugin load\n" ++
+                           "# second comment\n" ++
+                           "<Plugin ping>\n" ++
+                           " Host \"example.org\"\n" ++
+                           "</Plugin>\n" ++
+                           "# third comment\n" ++
+                           "LoadPlugin ping\n") `shouldBe`
+        Right
+          [ Option "LoadPlugin" [StringValue "cpu"] []
+          , Option "LoadPlugin" [StringValue "load"] []
+          , Option "Plugin" [StringValue "ping"] [Option "Host" [StringValue "example.org"] []]
+          , Option "LoadPlugin" [StringValue "ping"] []
+          ]
