@@ -1,5 +1,7 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.Collectd where
 
@@ -7,7 +9,7 @@ module System.EtCetera.Collectd where
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/parser.y
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/scanner.l
 
-import           Control.Category ((.))
+import           Control.Category ((.), id)
 import           Data.Char (ord)
 import           Data.List (intersperse)
 import           Data.Maybe (listToMaybe)
@@ -15,11 +17,13 @@ import           Data.Monoid ((<>))
 import           Numeric (showHex, showOct)
 import           Prelude hiding ((.), id)
 import           Text.Boomerang.Combinators (duck1, manyl, opt, push, rCons, rList, rList1, rListSep,
-                                             rNil, somel, chainl, chainr)
+                                             rNil, somel, chainl, chainr, rPair)
+import           Text.Boomerang.Error (condenseErrors, mkParserError, ErrorMsg(..))
 import           Text.Boomerang.HStack (arg, (:-)(..))
-import           Text.Boomerang.Prim (Boomerang, xmaph, xpure, runParser, prs)
-import           Text.Boomerang.Pos (initialPos)
-import           Text.Boomerang.String (alpha, anyChar, char, digit, lit, satisfy, StringBoomerang,
+import           Text.Boomerang.Prim (bestErrors, Boomerang(..), Parser(..), xmaph, xpure, runParser, prs,
+                                      val)
+import           Text.Boomerang.Pos (ErrorPosition(..), InitialPosition(..), MajorMinorPos, Pos)
+import           Text.Boomerang.String (alpha, anyChar, char, digit, lit, satisfy, StringBoomerang(..),
                                         StringError)
 
 type Name = String
@@ -184,29 +188,7 @@ unquote = xpure (arg (:-) u) q
 
 string = unquotedString <> unquote . quotedString
 
-data Value = BooleanValue Bool
-           | FloatValue Float
-           | IntValue Int
-           | StringValue String
-  deriving (Show, Eq)
-
-argument :: StringBoomerang r (Value :- r)
-argument = string <> true <> false
-
-argumentList :: StringBoomerang r ([Value] :- r)
-argumentList = rList1 (somel whiteSpace . argument)
-
-type Label = String
-data Option = Option Label [Value]
-  deriving (Eq, Show)
-
-option :: StringBoomerang r (Option :- r)
-option =
-  option' . identifier . argumentList . eol
- where
-  option' :: StringBoomerang (Value :- [Value] :- r) (Option :- r)
-  option' = xpure (arg (arg (:-)) (\(StringValue i) as -> Option i as))
-                  (\(Option i as :- r) -> Just (StringValue i :- as :- r))
+-- XXX: Still missing parsers
 -- PORT (6(5(5(3[0-5]|[0-2][0-9])|[0-4][0-9][0-9])|[0-4][0-9][0-9][0-9])|[1-5][0-9][0-9][0-9][0-9]|[1-9][0-9]?[0-9]?[0-9]?)
 -- 
 -- IP_BYTE (2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])
@@ -222,3 +204,68 @@ option =
 -- V6_PART ({HEX16}:{HEX16}|{IPV4_ADDR})
 -- IPV6_BASE ({HEX16}:){6}{V6_PART}|::({HEX16}:){5}{V6_PART}|({HEX16})?::({HEX16}:){4}{V6_PART}|(({HEX16}:){0,1}{HEX16})?::({HEX16}:){3}{V6_PART}|(({HEX16}:){0,2}{HEX16})?::({HEX16}:){2}{V6_PART}|(({HEX16}:){0,3}{HEX16})?::{HEX16}:{V6_PART}|(({HEX16}:){0,4}{HEX16})?::{V6_PART}|(({HEX16}:){0,5}{HEX16})?::{HEX16}|(({HEX16}:){0,6}{HEX16})?::
 -- IPV6_ADDR ({IPV6_BASE})|(\[{IPV6_BASE}\](:{PORT})?)
+
+data Value = BooleanValue Bool
+           | FloatValue Float
+           | IntValue Int
+           | StringValue String
+  deriving (Show, Eq)
+
+argument :: StringBoomerang r (Value :- r)
+argument = number <> true <> false <> string
+
+argumentList :: StringBoomerang r ([Value] :- r)
+argumentList = rList1 (somel whiteSpace . argument)
+
+type Label = String
+data Option = Option Label [Value] [Option]
+  deriving (Eq, Show)
+
+option' :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
+option' =
+  xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> Option i as os))
+         optionSerializer
+
+ where
+  optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
+  optionSerializer (Option i as os :- r) = Just (StringValue i :- as :- os :- r)
+
+option :: StringBoomerang r (Option :- r)
+option =
+  option' . identifier . argumentList . push []
+
+
+section :: StringBoomerang r (Option :- r)
+section =
+  Boomerang
+      (Parser $ \tok pos ->
+         case parse1Partial (rPair . section' . lit "</" . identifier . lit ">") tok pos of
+           Right (((opt@(Option label args opts), StringValue closingTag), tok'), pos') ->
+             if label == closingTag
+               then [Right ((\r -> opt :- r, tok'), pos')]
+               else mkParserError pos'
+                      [ Expect label
+                      , Message
+                          ("Closing tag (" ++
+                           closingTag ++
+                           ") should be the same as openning one (" ++
+                           label ++
+                           ")")
+                      ]
+           Left e -> [Left . condenseErrors $ e])
+      undefined
+ where
+  parse1Partial :: Boomerang StringError String () (t :- ()) ->
+                   String ->
+                   MajorMinorPos ->
+                   Either [StringError] ((t, String), MajorMinorPos)
+  parse1Partial parser input position =
+      let rawResult = runParser (prs parser) input position
+          results = [either Left (\((f, t), p) -> Right ((f (), t), p)) r | r <- rawResult]
+      in case [r | (Right r) <- results] of
+               (((u :- (), t), p):_) -> Right ((u, t), p)
+               _             -> Left $ bestErrors [ e | Left e <- results ]
+
+  section' = option' . lit "<" . identifier . (argumentList <> push []) . lit ">" . eol . (options <> push [])
+
+options = rList1 ((section <> option) . eol)

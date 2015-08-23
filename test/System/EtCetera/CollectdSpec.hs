@@ -6,7 +6,7 @@ module System.EtCetera.CollectdSpec where
 import           Control.Category ((.), id)
 import           Data.Maybe (listToMaybe)
 import           Prelude hiding ((.), id)
-import           System.EtCetera.Collectd (argumentList, number, floatNumber, option, Option(..), quotedString,
+import           System.EtCetera.Collectd (argumentList, section, number, floatNumber, option, Option(..), quotedString,
                                            string, QuotedString, QuotedStringPart(..), Value(..))
 import           Text.Boomerang.Combinators (rList1)
 import           Text.Boomerang.String (unparseString, parseString, StringError)
@@ -94,19 +94,29 @@ suite = do
        Right [StringValue "/etc/collectd.d", StringValue "*.conf"]
   describe "EtCetera.Collectd.option boomerang" $ do
     it "parses simple option with single argument" $
-      parseString option "LoadPlugin cpu\n" `shouldBe`
-        (Right . Option "LoadPlugin" $ [StringValue "cpu"])
+      parseString option "LoadPlugin cpu" `shouldBe`
+        (Right . Option "LoadPlugin" [StringValue "cpu"] $ [])
     it "parses simple option with single quoted argument" $
-      parseString option "LoadPlugin \"cpu\"\n" `shouldBe`
-        (Right . Option "LoadPlugin" $ [StringValue "cpu"])
+      parseString option "LoadPlugin \"cpu\"" `shouldBe`
+        (Right . Option "LoadPlugin" [StringValue "cpu"] $ [])
     it "parses simple option with multiple unquoted arguments" $
-      parseString option "DriverOption host localhost\n" `shouldBe`
-        (Right . Option "DriverOption" $ [StringValue "host", StringValue "localhost"])
+      parseString option "DriverOption host localhost" `shouldBe`
+        (Right . Option "DriverOption" [StringValue "host", StringValue "localhost"] $ [])
     it "parses simple option with multiple quoted simple arguments" $
-      parseString option "DriverOption \"host\" \"localhost\"\n" `shouldBe`
-        (Right . Option "DriverOption" $ [StringValue "host", StringValue "localhost"])
+      parseString option "DriverOption \"host\" \"localhost\"" `shouldBe`
+        (Right . Option "DriverOption" [StringValue "host", StringValue "localhost"] $ [])
     it "parses simple option with multiple quoted paths" $
-      parseString option "Include \"/etc/collectd.d/*\" \"localhost\"\n" `shouldBe`
-        (Right . Option "Include" $ [StringValue "/etc/collectd.d/*", StringValue "localhost"])
+      parseString option "Include \"/etc/collectd.d/*\" \"localhost\"" `shouldBe`
+        (Right . Option "Include" [StringValue "/etc/collectd.d/*", StringValue "localhost"] $ [])
+  describe "EtCetera.Collectd.section boomerang" $ do
+    it "parses empty section" $
+      parseString section "<Plugin>\n</Plugin>" `shouldBe`
+        (Right . Option "Plugin" [] $ [])
+    it "parses section option with arguments" $
+      parseString section "<Plugin arg1 1 2>\n</Plugin>" `shouldBe`
+        (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [])
+    it "parses section option with arguments and children" $
+      parseString section "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
+        (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8] []])
 
 
