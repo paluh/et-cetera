@@ -93,29 +93,29 @@ suite = do
      parseString argumentList " \"/etc/collectd.d\" \"*.conf\"" `shouldBe`
        Right [StringValue "/etc/collectd.d", StringValue "*.conf"]
   describe "EtCetera.Collectd.option boomerang" $ do
-    it "parses simple option with single argument" $
+    it "parses option with single argument" $
       parseString option "LoadPlugin cpu" `shouldBe`
         (Right . Option "LoadPlugin" [StringValue "cpu"] $ [])
     it "parses simple option with single quoted argument" $
       parseString option "LoadPlugin \"cpu\"" `shouldBe`
         (Right . Option "LoadPlugin" [StringValue "cpu"] $ [])
-    it "parses simple option with multiple unquoted arguments" $
+    it "parses option with multiple unquoted arguments" $
       parseString option "DriverOption host localhost" `shouldBe`
         (Right . Option "DriverOption" [StringValue "host", StringValue "localhost"] $ [])
-    it "parses simple option with multiple quoted simple arguments" $
+    it "parses option with multiple quoted simple arguments" $
       parseString option "DriverOption \"host\" \"localhost\"" `shouldBe`
         (Right . Option "DriverOption" [StringValue "host", StringValue "localhost"] $ [])
-    it "parses simple option with multiple quoted paths" $
+    it "parses option with multiple quoted paths" $
       parseString option "Include \"/etc/collectd.d/*\" \"localhost\"" `shouldBe`
         (Right . Option "Include" [StringValue "/etc/collectd.d/*", StringValue "localhost"] $ [])
   describe "EtCetera.Collectd.section boomerang" $ do
     it "parses empty section" $
       parseString section "<Plugin>\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" [] $ [])
-    it "parses section option with arguments" $
+    it "parses section with arguments" $
       parseString section "<Plugin arg1 1 2>\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [])
-    it "parses section option with arguments and children" $
+    it "parses section with arguments and children" $
       parseString section "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8] []])
 
