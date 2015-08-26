@@ -50,7 +50,7 @@ whiteSpace :: StringBoomerang r r
 whiteSpace = lit " " <> lit "\t" <> lit "\b" <> lit "\\\n" <> lit "\\\r\n"
 
 eol :: StringBoomerang r r
-eol = lit "\r\n" <> lit "\n"
+eol = lit "\n" <> lit "\r\n"
 
 eolOrComment :: StringBoomerang r r
 eolOrComment = comment <> eol
@@ -100,7 +100,13 @@ quotedString =
         otherwise -> Nothing
 
 unquotedString :: StringBoomerang r (Value :- r)
-unquotedString = xpure (arg (:-) StringValue) (\(StringValue s :- r)-> Just (s :- r)) . rList1 (alpha <> digit)
+unquotedString =
+  xpure (arg (:-) StringValue) serializer . rList1 (alpha <> digit)
+ where
+  serializer :: (Value :- r) -> Maybe (String :- r)
+  serializer (StringValue s :- r) = Just (s :- r)
+  serializer _                    = Nothing
+
 
 -- HEX_NUMBER 0[xX][0-9a-fA-F]+
 hexNumber :: StringBoomerang r (Value :- r)
@@ -108,16 +114,22 @@ hexNumber =
   hex . (rCons . char '0') . (rCons  . oneOf "xX") .
     rList1 (digit <> alphaInRange 'a' 'f' <> alphaInRange 'A' 'F')
  where
-  hex = xpure (arg (:-) (IntValue . read))
-                    (\(IntValue x :- r) -> Just (("0x" ++ showHex x "") :- r))
+  hex = xpure (arg (:-) (IntValue . read)) intValSerializer
+
+  intValSerializer :: (Value :- r) -> Maybe (String :- r)
+  intValSerializer (IntValue x :- r) = Just (("0x" ++ showHex x "") :- r)
+  intValSerializer _                 = Nothing
 
 -- OCT_NUMBER 0[0-7]+
 octalNumber :: StringBoomerang r (Value :- r)
 octalNumber =
   octal . (rCons . char '0' . rCons . push 'o') . rList1  (digitInRange 0 7)
  where
-  octal = xpure (arg (:-) (IntValue . read))
-                    (\(IntValue x :- r) -> Just (("0x" ++ showOct x "") :- r))
+  octal = xpure (arg (:-) (IntValue . read)) intValSerializer
+
+  intValSerializer :: (Value :- r) -> Maybe (String :- r)
+  intValSerializer (IntValue x :- r) = Just (("0x" ++ showOct x "") :- r)
+  intValSerializer _                 = Nothing
 
 -- DEC_NUMBER [\+\-]?[0-9]+
 decNumber :: StringBoomerang r (Value :- r)
@@ -127,7 +139,10 @@ decNumber =
   int = xpure (arg (:-) (\x -> case x of
                                     ('+':r)   -> IntValue (read r)
                                     otherwise -> IntValue (read x)))
-                  (\(IntValue x :- r) -> Just (show x :- r))
+                  intValSerializer
+  intValSerializer :: (Value :- r) -> Maybe (String :- r)
+  intValSerializer (IntValue x :- r) = Just (show x :- r)
+  intValSerializer _                 = Nothing
 
 -- FLOAT_NUMBER [\+\-]?[0-9]*\.[0-9]+([eE][\+\-][0-9]+)?
 floatNumber :: StringBoomerang r (Value :- r)
@@ -151,7 +166,11 @@ floatNumber =
   readFloat = xpure (arg (:-) (\n@(s:f) -> case s of
                                             '+'       -> FloatValue . read $ f
                                             otherwise -> FloatValue . read $ n))
-                    (\(FloatValue f :- r) -> Just (show f :- r))
+                    floatSerizlier
+
+  floatSerizlier :: (Value :- r) -> Maybe (String :- r)
+  floatSerizlier (FloatValue f :- r) = Just (show f :- r)
+  floatSerizlier _                   = Nothing
 
 number :: StringBoomerang r (Value :- r)
 number = octalNumber <> decNumber <> hexNumber <> floatNumber
@@ -214,6 +233,7 @@ unquote = xpure (arg (:-) u) q
   u' (Literal s) = s
 
   q (StringValue s :- r) = Just (q' s :- r)
+  q _                    = Nothing
   q' []       = []
   q' ('\\':r) = qCons (Escaped "\\") (q' r)
   q' ('"':r)  = qCons (Escaped "\"") (q' r)
@@ -255,47 +275,78 @@ argument :: StringBoomerang r (Value :- r)
 argument = number <> true <> false <> string
 
 argumentList :: StringBoomerang r ([Value] :- r)
-argumentList = rList1 (somel whiteSpace . argument)
+argumentList = rList (somel whiteSpace . argument)
 
 type Label = String
-data Option = Option Label [Value] [Option]
+data Option = Option Label [Value] | Section Label [Value] [Option]
   deriving (Eq, Show)
 
-option' :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
-option' =
-  xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> Option i as os))
-         optionSerializer
-
- where
-  optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
-  optionSerializer (Option i as os :- r) = Just (StringValue i :- as :- os :- r)
+optionLabel :: Option -> Label
+optionLabel (Option l _) = l
+optionLabel (Section l _ _) = l
 
 option :: StringBoomerang r (Option :- r)
 option =
-  option' . identifier . argumentList . push []
-
-section :: StringBoomerang r (Option :- r)
-section =
   Boomerang pf sf
  where
   pf =
     Parser $ \tok pos ->
       case parse1Partial (rPair . section' . lit "</" . identifier . lit ">") tok pos of
-        Right (((opt@(Option label args opts), StringValue closingTag), tok'), pos') ->
-          if label == closingTag
-            then [Right ((\r -> opt :- r, tok'), pos')]
-            else mkParserError pos'
-              [ Expect label
-              , Message
-                  ("Closing tag (" ++
-                   closingTag ++
-                   ") should be the same as openning one (" ++
-                   label ++
-                   ")")
-              ]
-        Left e -> [Left . condenseErrors $ e]
-  sf = error "serilizer for section not implemented"
-  section' = option' . lit "<" . identifier . (argumentList <> push []) . lit ">" . eolOrComment . (options <> push [])
+        Right (((opt, StringValue closingTag), tok'), pos') ->
+          let label = optionLabel opt
+          in if label == closingTag
+              then [Right ((\r -> opt :- r, tok'), pos')]
+              else mkParserError pos'
+                [ Expect label
+                , Message
+                    ("Closing tag (" ++
+                     closingTag ++
+                     ") should be the same as openning one (" ++
+                     label ++
+                     ")")
+                ]
+        Left e  -> runParser (prs option') tok pos
+  sf s@(Option i args :- r) = ser option' s
+  sf (s@(Section i args opts :- r))  = [(fmap (++ ("</" ++ i ++ ">")) tok2tok, r) |(tok2tok, r) <- ser section' s]
+
+  section' = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .
+             eolOrComment . options
+
+  option' :: StringBoomerang r (Option :- r)
+  option' =
+    assembleOption . identifier . argumentList . push []
+
+  assembleOption :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
+  assembleOption =
+    xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> if null os then Option i as else Section i as os))
+           optionSerializer
+
+   where
+    optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
+    optionSerializer (Option i as :- r) = Just (StringValue i :- as :- [] :- r)
+    optionSerializer (Section i as os :- r) = Just (StringValue i :- as :- os :- r)
+
 
 options :: Boomerang StringError String r ([Option] :- r)
-options = manyr eolOrComment . push [] <> rList1 ((manyl whiteSpace . (section <> option)) . somel eolOrComment)
+options = rList1 ((manyl whiteSpace . option) . somel eolOrComment) <> manyr eolOrComment . push []
+
+-- data Globals =
+--        Globals
+--          { autoLoadPlugin :: Optional Bool
+--          , baseDir :: Optional FilePath
+--          , hostname :: Optional String
+--          , includePath :: Optional Include
+--          , interval :: Optional Seconds
+--          , pidFile :: Optional FilePath
+--          , pluginDir :: Optional FilePath
+--          , readThreads :: Optional Int
+--          , typesDB :: Optional [FilePath]
+--          , timeout :: Optional Iterations
+--          , writeThreads :: Optional Int
+--          , writeQueueLimitHigh :: Optional Int
+--          , writeQueueLimitLow :: Optional Int
+--          }
+--   -- PostCacheChain ChainName
+--   -- FQDNLookup true|false
+--   -- PreCacheChain ChainName
+--   deriving Show
