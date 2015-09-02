@@ -4,12 +4,13 @@
 module System.EtCetera.CollectdSpec where
 
 import           Control.Category ((.)) --, id)
+import           Data.Maybe (fromMaybe)
 import           Prelude hiding ((.), id)
 import           System.EtCetera.Collectd (argumentList, comment, option, number,
                                            option, Option(..),
                                            options, quotedString,
                                            QuotedStringPart(..),
-                                           Value(..))
+                                           Value(..), options')
 import           Text.Boomerang.Combinators (push, rList1)
 import           Text.Boomerang.HStack ((:-)(..))
 import           Text.Boomerang.Prim (unparse)
@@ -19,17 +20,31 @@ import           Test.Hspec (describe, it, shouldBe, Spec)
 main :: IO ()
 main = do
   print "test"
-  --print $ unparseString option (Option "LoadPlugin" [StringValue "df"] [])
-  --print $ unparseString options [ Option "LoadPlugin" [StringValue "df"] []
+  --print $ unparseString (option "") (Option "LoadPlugin" [StringValue "df"] [])
+  --print $ unparseString (options "") [ Option "LoadPlugin" [StringValue "df"] []
   --                              , Option "LoadPlugin" [StringValue "df"] []
   --                              , Option "LoadPlugin" [StringValue "load"] []
   --                              , Option "LoadPlugin" [StringValue "ping"] []
   --                              ]
-  print $ unparseString option (Section "LoadPlugin" [StringValue "df"]
-                                                     [Option "Test" [StringValue "8", IntValue 8]])
+  -- print $ unparseString (option "") (Section "LoadPlugin" [StringValue "df"]
+  --                                                    [Option "Test" [StringValue "8", IntValue 8]])
 
-  print $ unparseString options [Section "LoadPlugin" [StringValue "df"]
-                                                      [Option "Test" [StringValue "8"]]]
+  let x = fromMaybe "" $ unparseString (options "") [Section "Section1" [StringValue "df"]
+                                                       [Option "Suboption" [StringValue "1"],
+                                                        Section "Subsection2" [StringValue "2"] [],
+                                                        Option "Suboption" [StringValue "3"]],
+                                                     Section "Section3" []
+                                                       [Section "Subsection4" [StringValue "lklj"] [
+                                                           Option "Subsuboption" [StringValue "9"],
+                                                           Option "Subsuboption" []]]]
+  putStr x
+  -- print $ unparseString (options "") [Section "Section1" [StringValue "df"]
+  --                                                     [Option "Option1" [StringValue "1"],
+  --                                                      Section "Option2" [StringValue "2"] [],
+  --                                                      Option "Option3" [StringValue "3"]],
+  --                                Section "Section2" [] [Section "Ble" [] [Option "T" [StringValue "9"], Option "Z" []]]]
+  -- print $ parseString options' "\nTest 8"
+  -- print $ parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>"
 
 suite :: Spec
 suite = do
@@ -113,79 +128,83 @@ suite = do
        Right [StringValue "/etc/collectd.d", StringValue "*.conf"]
   describe "EtCetera.Collectd.option boomerang" $ do
     it "parses option with single argument" $
-      parseString option "LoadPlugin cpu" `shouldBe`
+      parseString (option "") "LoadPlugin cpu" `shouldBe`
         (Right . Option "LoadPlugin" $ [StringValue "cpu"])
     it "parses simple option with single quoted argument" $
-      parseString option "LoadPlugin \"cpu\"" `shouldBe`
+      parseString (option "") "LoadPlugin \"cpu\"" `shouldBe`
         (Right . Option "LoadPlugin" $ [StringValue "cpu"])
     it "parses option with multiple unquoted arguments" $
-      parseString option "DriverOption host localhost" `shouldBe`
+      parseString (option "") "DriverOption host localhost" `shouldBe`
         (Right . Option "DriverOption" $ [StringValue "host", StringValue "localhost"])
     it "parses option with multiple quoted simple arguments" $
-      parseString option "DriverOption \"host\" \"localhost\"" `shouldBe`
+      parseString (option "") "DriverOption \"host\" \"localhost\"" `shouldBe`
         (Right . Option "DriverOption" $ [StringValue "host", StringValue "localhost"])
     it "parses option with multiple quoted paths" $
-      parseString option "Include \"/etc/collectd.d/*\" \"localhost\"" `shouldBe`
+      parseString (option "") "Include \"/etc/collectd.d/*\" \"localhost\"" `shouldBe`
         (Right . Option "Include" $ [StringValue "/etc/collectd.d/*", StringValue "localhost"])
     it "parses empty section" $
-      parseString option "<Plugin>\n</Plugin>" `shouldBe`
+      parseString (option "") "<Plugin>\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" $ [])
     it "parses section with arguments" $
-      parseString option "<Plugin arg1 1 2>\n</Plugin>" `shouldBe`
+      parseString (option "") "<Plugin arg1 1 2>\n</Plugin>" `shouldBe`
         (Right . Option "Plugin" $ [StringValue "arg1", IntValue 1, IntValue 2])
     it "parses section with arguments and children" $
-      parseString option "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
+      parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
         (Right . Section "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8]])
     it "parses section with muliline children" $
-       parseString option "<Plugin arg1 1 2>\nChild1 2.8\\\n 8 9\n</Plugin>" `shouldBe`
+       parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\\\n 8 9\n</Plugin>" `shouldBe`
          (Right . Section "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $
                                    [Option "Child1" [FloatValue 2.8, IntValue 8, IntValue 9]])
-  -- describe "EtCetera.Collectd.comment boomerang" $ -- do
-  --   it "parses single comment" $
-  --     parseString (comment . push ()) "    #just comment\n" `shouldBe`
-  --       Right ()
-  -- describe "EtCetera.Collectd.options boomerang" $ do
-  --   it "parses single comment" $
-  --     parseString options "    #just comment\n" `shouldBe`
-  --       Right []
-  --   it "parses option ended with comment" $
-  --     parseString options "LoadPlugin cpu #some comment\n" `shouldBe`
-  --       Right [Option "LoadPlugin" [StringValue "cpu"] []]
-  --   it "parses options separated by comments" $
-  --     parseString options ("LoadPlugin cpu\n" ++
-  --                          "# first comment\n" ++
-  --                          "LoadPlugin load\n" ++
-  --                          "# second comment\n" ++
-  --                          "LoadPlugin ping\n") `shouldBe`
-  --       Right [ Option "LoadPlugin" [StringValue "cpu"] []
-  --             , Option "LoadPlugin" [StringValue "load"] []
-  --             , Option "LoadPlugin" [StringValue "ping"] []
-  --             ]
-  --   it "parses options and sections separated by comments" $
-  --     parseString options ("LoadPlugin cpu\n" ++
-  --                          "# first comment\n" ++
-  --                          "LoadPlugin load\n" ++
-  --                          "# second comment\n" ++
-  --                          "<Plugin ping>\n" ++
-  --                          " Host \"example.org\"\n" ++
-  --                          "</Plugin>\n" ++
-  --                          "# third comment\n" ++
-  --                          "LoadPlugin ping\n") `shouldBe`
-  --       Right
-  --         [ Option "LoadPlugin" [StringValue "cpu"] []
-  --         , Option "LoadPlugin" [StringValue "load"] []
-  --         , Option "Plugin" [StringValue "ping"] [Option "Host" [StringValue "example.org"] []]
-  --         , Option "LoadPlugin" [StringValue "ping"] []
-  --         ]
+  describe "EtCetera.Collectd.comment boomerang" $ -- do
+    it "parses single comment" $
+      parseString (comment . push ()) "    #just comment\n" `shouldBe`
+        Right ()
+  describe "EtCetera.Collectd.options boomerang" $ do
+    it "parses single comment" $
+      parseString (options "") "    #just comment\n" `shouldBe`
+        Right []
+    it "parses option ended with comment" $
+      parseString (options "") "LoadPlugin cpu #some comment\n" `shouldBe`
+        Right [Option "LoadPlugin" [StringValue "cpu"]]
+  it "parses options separated by comments" $
+    parseString (options "") ("LoadPlugin cpu\n" ++
+                         "# first comment\n" ++
+                         "LoadPlugin load\n" ++
+                         "# second comment\n" ++
+                         "LoadPlugin ping\n") `shouldBe`
+      Right [ Option "LoadPlugin" [StringValue "cpu"]
+            , Option "LoadPlugin" [StringValue "load"]
+            , Option "LoadPlugin" [StringValue "ping"]
+            ]
+  it "parses options and sections separated by comments" $
+    parseString (options "") ("LoadPlugin cpu\n" ++
+                         "# first comment\n" ++
+                         "LoadPlugin load\n" ++
+                         "# second comment\n" ++
+                         "<Plugin ping>\n" ++
+                         " Host \"example.org\"\n" ++
+                         "</Plugin>\n" ++
+                         "# third comment\n" ++
+                         "LoadPlugin ping\n") `shouldBe`
+      Right
+        [ Option "LoadPlugin" [StringValue "cpu"]
+        , Option "LoadPlugin" [StringValue "load"]
+        , Section "Plugin" [StringValue "ping"] [Option "Host" [StringValue "example.org"]]
+        , Option "LoadPlugin" [StringValue "ping"]
+        ]
 
-  --   it "prints single option" $
-  --     unparseString options [ Option "LoadPlugin" [StringValue "cpu"] []
-  --                           ] `shouldBe` Just "LoadPlugin cpu\n"
-  --   it "prints multiple options" $
-  --     unparseString options [ Option "LoadPlugin" [StringValue "cpu"] []
-  --                           , Option "LoadPlugin" [StringValue "load"] []
-  --                           , Option "LoadPlugin" [StringValue "ping"] []
-  --                           ] `shouldBe` Just "LoadPlugin cpu\nLoadPlugin load\nLoadPlugin ping\n"
-  --   it "prints single section" $
-  --     unparseString options [ Option "LoadPlugin" [StringValue "df"] [Option "Interval" [] []]
-  --                           ] `shouldBe` Just "LoadPlugin cpu\nLoadPlugin load\nLoadPlugin ping\n"
+  it "prints single option" $
+    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"]
+                          ] `shouldBe` Just "LoadPlugin cpu"
+  it "prints multiple options" $
+    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"]
+                          , Option "LoadPlugin" [StringValue "load"]
+                          , Option "LoadPlugin" [StringValue "ping"]
+                          ] `shouldBe` Just "LoadPlugin cpu\nLoadPlugin load\nLoadPlugin ping"
+  it "prints single section" $
+    unparseString (options "")
+      [ Section "LoadPlugin" [StringValue "df"]
+          [ Option "Interval" [StringValue "arg1"]
+          , Section "Section" [] [Section "Subsection" [] [Option "Option" [], Option "Option2" [], Section "Subsubsection" [] [Option "bleble" [IntValue 999]]]]
+          ]
+      ] `shouldBe` Just "<LoadPlugin df>\n\tInterval arg1\n\t<Section>\n\t\t<Subsection>\n\t\t\tOption\n\t\t\tOption2\n\t\t\t<Subsubsection>\n\t\t\t\tbleble 999\n\t\t\t</Subsubsection>\n\t\t</Subsection>\n\t</Section>\n</LoadPlugin>"

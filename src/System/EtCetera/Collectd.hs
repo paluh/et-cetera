@@ -17,6 +17,7 @@ import           Data.List (intersperse)
 import           Data.Maybe (listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Ord (compare, Ordering(..))
+import           Debug.Trace (trace)
 import           Numeric (showHex, showOct)
 import           Prelude hiding ((.), id)
 import           Text.Boomerang.Combinators (duck1, manyl, manyr, opt, push, rCons, rList, rList1, rListSep,
@@ -285,13 +286,14 @@ optionLabel :: Option -> Label
 optionLabel (Option l _) = l
 optionLabel (Section l _ _) = l
 
-option :: StringBoomerang r (Option :- r)
-option =
+-- XXX: please, refactor this mess
+option :: String -> StringBoomerang r (Option :- r)
+option indent =
   Boomerang pf sf
  where
   pf =
     Parser $ \tok pos ->
-      case parse1Partial (rPair . section' . lit "</" . identifier . lit ">") tok pos of
+      case parse1Partial (rPair . section' indent . lit "</" . identifier . lit ">") tok pos of
         Right (((opt, StringValue closingTag), tok'), pos') ->
           let label = optionLabel opt
           in if label == closingTag
@@ -307,28 +309,36 @@ option =
                 ]
         Left e  -> runParser (prs option') tok pos
   sf s@(Option i args :- r) = ser option' s
-  sf (s@(Section i args opts :- r))  = [(fmap (++ ("</" ++ i ++ ">")) tok2tok, r) |(tok2tok, r) <- ser section' s]
-
-  section' = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .
-             eolOrComment . options
+  sf (s@(Section i args opts :- r))  =
+    ser section'' s
+   where
+    section'' = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .
+                options' ('\t':indent) . lit "\n" . (lit indent <> manyl whiteSpace) . lit ("</" ++ i ++ ">")
 
   option' :: StringBoomerang r (Option :- r)
   option' =
     assembleOption . identifier . argumentList . push []
 
-  assembleOption :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
-  assembleOption =
-    xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> if null os then Option i as else Section i as os))
-           optionSerializer
+  section' indent = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .  options' indent
 
-   where
-    optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
-    optionSerializer (Option i as :- r) = Just (StringValue i :- as :- [] :- r)
-    optionSerializer (Section i as os :- r) = Just (StringValue i :- as :- os :- r)
+  options' :: String -> StringBoomerang r ([Option] :- r)
+  options' indent = rList (somel eolOrComment . (lit indent <> manyl whiteSpace) . option indent) . manyl eolOrComment
 
 
-options :: Boomerang StringError String r ([Option] :- r)
-options = rList1 ((manyl whiteSpace . option) . somel eolOrComment) <> manyr eolOrComment . push []
+assembleOption :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
+assembleOption =
+  xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> if null os then Option i as else Section i as os))
+         optionSerializer
+ where
+  optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
+  optionSerializer (Option i as :- r) = Just (StringValue i :- as :- [] :- r)
+  optionSerializer (Section i as os :- r) = Just (StringValue i :- as :- os :- r)
+
+
+options :: String -> Boomerang StringError String r ([Option] :- r)
+options indent = (rCons . manyl whiteSpace . option indent <> id) .
+                 rList (somel eolOrComment . manyl whiteSpace . option indent) .
+                 manyl eolOrComment
 
 -- data Globals =
 --        Globals
