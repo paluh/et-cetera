@@ -10,12 +10,15 @@ module System.EtCetera.Collectd where
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/parser.y
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/scanner.l
 
+import           Control.Applicative (Applicative(..), (<$>), (<*>))
+import           Control.Arrow (first)
 import           Control.Category ((.), id)
 import           Data.Char (ord)
 import           Data.Function (on)
 import           Data.List (intersperse)
 import           Data.Maybe (listToMaybe)
 import           Data.Monoid ((<>))
+import           Data.Optional (Optional(..))
 import           Data.Ord (compare, Ordering(..))
 import           Debug.Trace (trace)
 import           Numeric (showHex, showOct)
@@ -279,15 +282,15 @@ argumentList :: StringBoomerang r ([Value] :- r)
 argumentList = rList (somel whiteSpace . argument)
 
 type Label = String
-data Option = Option Label [Value] | Section Label [Value] [Option]
+data ConfigOption = ConfigOption Label [Value] | ConfigSection Label [Value] [ConfigOption]
   deriving (Eq, Show)
 
-optionLabel :: Option -> Label
-optionLabel (Option l _) = l
-optionLabel (Section l _ _) = l
+optionLabel :: ConfigOption -> Label
+optionLabel (ConfigOption l _) = l
+optionLabel (ConfigSection l _ _) = l
 
 -- XXX: please, refactor this mess
-option :: String -> StringBoomerang r (Option :- r)
+option :: String -> StringBoomerang r (ConfigOption :- r)
 option indent =
   Boomerang pf sf
  where
@@ -308,55 +311,131 @@ option indent =
                      ")")
                 ]
         Left e  -> runParser (prs option') tok pos
-  sf s@(Option i args :- r) = ser option' s
-  sf (s@(Section i args opts :- r))  =
+  sf s@(ConfigOption i args :- r) = ser option' s
+  sf (s@(ConfigSection i args opts :- r))  =
     ser section'' s
    where
-    section'' = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .
+    section'' = assembleConfigOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .
                 options' ('\t':indent) . lit "\n" . (lit indent <> manyl whiteSpace) . lit ("</" ++ i ++ ">")
 
-  option' :: StringBoomerang r (Option :- r)
+  option' :: StringBoomerang r (ConfigOption :- r)
   option' =
-    assembleOption . identifier . argumentList . push []
+    assembleConfigOption . identifier . argumentList . push []
 
-  section' indent = assembleOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .  options' indent
+  section' indent = assembleConfigOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .  options' indent
 
-  options' :: String -> StringBoomerang r ([Option] :- r)
+  options' :: String -> StringBoomerang r ([ConfigOption] :- r)
   options' indent = rList (somel eolOrComment . (lit indent <> manyl whiteSpace) . option indent) . manyl eolOrComment
 
 
-assembleOption :: StringBoomerang (Value :- [Value] :- [Option] :- r) (Option :- r)
-assembleOption =
-  xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> if null os then Option i as else Section i as os))
+assembleConfigOption :: StringBoomerang (Value :- [Value] :- [ConfigOption] :- r) (ConfigOption :- r)
+assembleConfigOption =
+  xpure (arg (arg (arg (:-))) (\(StringValue i) as os -> if null os then ConfigOption i as else ConfigSection i as os))
          optionSerializer
  where
-  optionSerializer :: (Option :- r) -> Maybe (Value :- [Value] :- [Option] :- r)
-  optionSerializer (Option i as :- r) = Just (StringValue i :- as :- [] :- r)
-  optionSerializer (Section i as os :- r) = Just (StringValue i :- as :- os :- r)
+  optionSerializer :: (ConfigOption :- r) -> Maybe (Value :- [Value] :- [ConfigOption] :- r)
+  optionSerializer (ConfigOption i as :- r) = Just (StringValue i :- as :- [] :- r)
+  optionSerializer (ConfigSection i as os :- r) = Just (StringValue i :- as :- os :- r)
 
+data Option = Option Label [Value] [Option]
+
+convertOpt :: StringBoomerang (ConfigOption :- r) (Option :- r)
+convertOpt =
+  xpure (arg (:-) toOpt) (\(o :- r) ->  (Just (fromOpt o :- r)))
+ where
+  toOpt (ConfigOption l vs) = Option l vs []
+  toOpt (ConfigSection l vs os) = Option l vs (map toOpt os)
+
+  fromOpt (Option l vs []) = ConfigOption l vs
+  fromOpt (Option l vs os) = ConfigSection l vs (map fromOpt os)
 
 options :: String -> Boomerang StringError String r ([Option] :- r)
-options indent = (rCons . manyl whiteSpace . option indent <> id) .
-                 rList (somel eolOrComment . manyl whiteSpace . option indent) .
+options indent = (rCons . manyl whiteSpace . convertOpt . option indent <> id) .
+                 rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
                  manyl eolOrComment
+
+data Opt v = Opt { name :: String, optParser :: Maybe Option -> Maybe v }
+
+instance Functor Opt where
+  fmap f (Opt n p) = Opt n (fmap (fmap f) p)
+
+data OptParser a where
+  NilP :: a -> OptParser a
+  ConsP :: Opt (b -> a) -> OptParser b -> OptParser a
+
+instance Functor OptParser where
+  fmap f (NilP a) = NilP (f a)
+  fmap f (ConsP opt pb) = ConsP (fmap (fmap f) opt) pb
+
+instance Applicative OptParser where
+  pure = NilP
+  (<*>) (NilP a2b) (pa) = a2b <$> pa
+  (<*>) (ConsP optb2a2c pb) pa = ConsP (uncurry <$> optb2a2c) ((,) <$> pb <*> pa)
+
+run :: OptParser a -> [Option] -> Maybe (a, [Option])
+run (NilP a) os  = Just (a, os)
+run (ConsP opt pb) [] = do
+  (b2a, os') <- fmap (flip (,) []) (optParser opt Nothing)
+  run (fmap b2a pb) os'
+run p (o:os) =
+  case step p o os of
+    Nothing -> Nothing
+    Just (p', os') -> run p' os'
+
+step :: OptParser a -> Option -> [Option] -> Maybe (OptParser a, [Option])
+step p@(NilP _) _ [] = Just (p, [])
+step (NilP _) _ _    = Nothing
+step (ConsP opt@(Opt n o2b2a) pb) option@(Option n' _ _) os =
+  if n == n'
+     then do
+       b2a <- o2b2a (Just option)
+       return (fmap b2a pb, os)
+      else do
+        (pb', os') <- step pb option os
+        return (ConsP opt pb', os')
+
+p :: Opt v -> OptParser v
+p (Opt l v) = ConsP (Opt l (\o -> do r <- v o; return . const $ r)) (NilP ())
+
+boolOptPrs :: Label -> Opt Bool
+boolOptPrs l =
+  Opt l c
+ where
+  c (Just (Option l [BooleanValue b] [])) = Just b
+  c _                                     = Nothing
+
+strOptPrs :: Label -> Opt String
+strOptPrs l =
+  Opt l c
+ where
+  c (Just (Option _ [StringValue s] [])) = Just s
+  c _                                    = Nothing
+
+data Globals = Globals { autoLoadPlugin :: Bool, baseDir :: String }
+
+x = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDir")
+
+-- ([Option] -> (a, [Option]))
 
 -- data Globals =
 --        Globals
---          { autoLoadPlugin :: Optional Bool
---          , baseDir :: Optional FilePath
---          , hostname :: Optional String
---          , includePath :: Optional Include
---          , interval :: Optional Seconds
---          , pidFile :: Optional FilePath
---          , pluginDir :: Optional FilePath
---          , readThreads :: Optional Int
---          , typesDB :: Optional [FilePath]
---          , timeout :: Optional Iterations
---          , writeThreads :: Optional Int
---          , writeQueueLimitHigh :: Optional Int
---          , writeQueueLimitLow :: Optional Int
+--          { autoLoadPlugin :: ConfigOptional Bool
+--          , baseDir :: ConfigOptional FilePath
+--          , hostname :: ConfigOptional String
+--          -- , includePath :: ConfigOptional Include
+--          , interval :: ConfigOptional Int
+--          , pidFile :: ConfigOptional FilePath
+--          , pluginDir :: ConfigOptional FilePath
+--          , readThreads :: ConfigOptional Int
+--          , typesDB :: ConfigOptional [FilePath]
+--          -- , timeout :: ConfigOptional Iterations
+--          , writeThreads :: ConfigOptional Int
+--          , writeQueueLimitHigh :: ConfigOptional Int
+--          , writeQueueLimitLow :: ConfigOptional Int
 --          }
 --   -- PostCacheChain ChainName
 --   -- FQDNLookup true|false
 --   -- PreCacheChain ChainName
 --   deriving Show
+
+-- data ConfigOptionParser = {

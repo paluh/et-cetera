@@ -20,29 +20,29 @@ import           Test.Hspec (describe, it, shouldBe, Spec)
 main :: IO ()
 main = do
   print "test"
-  --print $ unparseString (option "") (Option "LoadPlugin" [StringValue "df"] [])
-  --print $ unparseString (options "") [ Option "LoadPlugin" [StringValue "df"] []
-  --                              , Option "LoadPlugin" [StringValue "df"] []
-  --                              , Option "LoadPlugin" [StringValue "load"] []
-  --                              , Option "LoadPlugin" [StringValue "ping"] []
+  --print $ unparseString (option "") (Option "LoadPlugin" [StringValue "df"] [] [])
+  --print $ unparseString (options "") [ Option "LoadPlugin" [StringValue "df"] [] []
+  --                              , Option "LoadPlugin" [StringValue "df"] [] []
+  --                              , Option "LoadPlugin" [StringValue "load"] [] []
+  --                              , Option "LoadPlugin" [StringValue "ping"] [] []
   --                              ]
-  -- print $ unparseString (option "") (Section "LoadPlugin" [StringValue "df"]
-  --                                                    [Option "Test" [StringValue "8", IntValue 8]])
+  -- print $ unparseString (option "") (Option "LoadPlugin" [StringValue "df"]
+  --                                                    [Option "Test" [StringValue "8", IntValue 8] []])
 
-  let x = fromMaybe "" $ unparseString (options "") [Section "Section1" [StringValue "df"]
-                                                       [Option "Suboption" [StringValue "1"],
-                                                        Section "Subsection2" [StringValue "2"] [],
-                                                        Option "Suboption" [StringValue "3"]],
-                                                     Section "Section3" []
-                                                       [Section "Subsection4" [StringValue "lklj"] [
-                                                           Option "Subsuboption" [StringValue "9"],
-                                                           Option "Subsuboption" []]]]
+  let x = fromMaybe "" $ unparseString (options "") [Option "Option1" [StringValue "df"] [] []
+                                                       [Option "Suboption" [StringValue "1"] [],
+                                                        Option "Subsection2" [StringValue "2"] [] [],
+                                                        Option "Suboption" [StringValue "3"] []],
+                                                     Option "Option3" []
+                                                       [Option "Subsection4" [StringValue "lklj"] [
+                                                           Option "Subsuboption" [StringValue "9"] [],
+                                                           Option "Subsuboption" [] []]]]
   putStr x
-  -- print $ unparseString (options "") [Section "Section1" [StringValue "df"]
-  --                                                     [Option "Option1" [StringValue "1"],
-  --                                                      Section "Option2" [StringValue "2"] [],
-  --                                                      Option "Option3" [StringValue "3"]],
-  --                                Section "Section2" [] [Section "Ble" [] [Option "T" [StringValue "9"], Option "Z" []]]]
+  -- print $ unparseString (options "") [Option "Option1" [StringValue "df"]
+  --                                                     [Option "Option1" [StringValue "1"] [],
+  --                                                      Option "Option2" [StringValue "2"] [],
+  --                                                      Option "Option3" [StringValue "3"] []],
+  --                                Option "Option2" [] [Option "Ble" [] [Option "T" [StringValue "9"] [], Option "Z" [] []]]]
   -- print $ parseString options' "\nTest 8"
   -- print $ parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>"
 
@@ -150,11 +150,11 @@ suite = do
         (Right . Option "Plugin" $ [StringValue "arg1", IntValue 1, IntValue 2])
     it "parses section with arguments and children" $
       parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\n</Plugin>" `shouldBe`
-        (Right . Section "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8]])
+        (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $ [Option "Child1" [FloatValue 2.8] []])
     it "parses section with muliline children" $
        parseString (option "") "<Plugin arg1 1 2>\nChild1 2.8\\\n 8 9\n</Plugin>" `shouldBe`
-         (Right . Section "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $
-                                   [Option "Child1" [FloatValue 2.8, IntValue 8, IntValue 9]])
+         (Right . Option "Plugin" [StringValue "arg1", IntValue 1, IntValue 2] $
+                                   [Option "Child1" [FloatValue 2.8, IntValue 8, IntValue 9] []])
   describe "EtCetera.Collectd.comment boomerang" $ -- do
     it "parses single comment" $
       parseString (comment . push ()) "    #just comment\n" `shouldBe`
@@ -165,16 +165,16 @@ suite = do
         Right []
     it "parses option ended with comment" $
       parseString (options "") "LoadPlugin cpu #some comment\n" `shouldBe`
-        Right [Option "LoadPlugin" [StringValue "cpu"]]
+        Right [Option "LoadPlugin" [StringValue "cpu"] []]
   it "parses options separated by comments" $
     parseString (options "") ("LoadPlugin cpu\n" ++
                          "# first comment\n" ++
                          "LoadPlugin load\n" ++
                          "# second comment\n" ++
                          "LoadPlugin ping\n") `shouldBe`
-      Right [ Option "LoadPlugin" [StringValue "cpu"]
-            , Option "LoadPlugin" [StringValue "load"]
-            , Option "LoadPlugin" [StringValue "ping"]
+      Right [ Option "LoadPlugin" [StringValue "cpu"] []
+            , Option "LoadPlugin" [StringValue "load"] []
+            , Option "LoadPlugin" [StringValue "ping"] []
             ]
   it "parses options and sections separated by comments" $
     parseString (options "") ("LoadPlugin cpu\n" ++
@@ -187,24 +187,24 @@ suite = do
                          "# third comment\n" ++
                          "LoadPlugin ping\n") `shouldBe`
       Right
-        [ Option "LoadPlugin" [StringValue "cpu"]
-        , Option "LoadPlugin" [StringValue "load"]
-        , Section "Plugin" [StringValue "ping"] [Option "Host" [StringValue "example.org"]]
-        , Option "LoadPlugin" [StringValue "ping"]
+        [ Option "LoadPlugin" [StringValue "cpu"] []
+        , Option "LoadPlugin" [StringValue "load"] []
+        , Option "Plugin" [StringValue "ping"] [Option "Host" [StringValue "example.org"] []]
+        , Option "LoadPlugin" [StringValue "ping"] []
         ]
 
   it "prints single option" $
-    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"]
+    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"] []
                           ] `shouldBe` Just "LoadPlugin cpu"
   it "prints multiple options" $
-    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"]
-                          , Option "LoadPlugin" [StringValue "load"]
-                          , Option "LoadPlugin" [StringValue "ping"]
+    unparseString (options "") [ Option "LoadPlugin" [StringValue "cpu"] []
+                          , Option "LoadPlugin" [StringValue "load"] []
+                          , Option "LoadPlugin" [StringValue "ping"] []
                           ] `shouldBe` Just "LoadPlugin cpu\nLoadPlugin load\nLoadPlugin ping"
   it "prints single section" $
     unparseString (options "")
-      [ Section "LoadPlugin" [StringValue "df"]
-          [ Option "Interval" [StringValue "arg1"]
-          , Section "Section" [] [Section "Subsection" [] [Option "Option" [], Option "Option2" [], Section "Subsubsection" [] [Option "bleble" [IntValue 999]]]]
+      [ Option "LoadPlugin" [StringValue "df"]
+          [ Option "Interval" [StringValue "arg1"] []
+          , Option "Option" [] [Option "Subsection" [] [Option "Option" [] [], Option "Option2" [] [], Option "Subsubsection" [] [Option "bleble" [IntValue 999] []]]]
           ]
-      ] `shouldBe` Just "<LoadPlugin df>\n\tInterval arg1\n\t<Section>\n\t\t<Subsection>\n\t\t\tOption\n\t\t\tOption2\n\t\t\t<Subsubsection>\n\t\t\t\tbleble 999\n\t\t\t</Subsubsection>\n\t\t</Subsection>\n\t</Section>\n</LoadPlugin>"
+      ] `shouldBe` Just "<LoadPlugin df>\n\tInterval arg1\n\t<Option>\n\t\t<Subsection>\n\t\t\tOption\n\t\t\tOption2\n\t\t\t<Subsubsection>\n\t\t\t\tbleble 999\n\t\t\t</Subsubsection>\n\t\t</Subsection>\n\t</Option>\n</LoadPlugin>"
