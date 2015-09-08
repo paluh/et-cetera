@@ -354,6 +354,7 @@ options indent = (rCons . manyl whiteSpace . convertOpt . option indent <> id) .
                  rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
                  manyl eolOrComment
 
+-- inspired by: http://www.paolocapriotti.com/blog/2012/04/27/applicative-option-parser/
 data Opt v = Opt { name :: String, optParser :: Maybe Option -> Maybe v }
 
 instance Functor Opt where
