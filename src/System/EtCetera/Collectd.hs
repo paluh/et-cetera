@@ -311,6 +311,8 @@ option indent =
                      ")")
                 ]
         Left e  -> runParser (prs option') tok pos
+  -- TODO: analyze this proposition again
+  -- sf (s@(ConfigSection i args [] :- r))  = ser option' s
   sf s@(ConfigOption i args :- r) = ser option' s
   sf (s@(ConfigSection i args opts :- r))  =
     ser section'' s
@@ -338,6 +340,7 @@ assembleConfigOption =
   optionSerializer (ConfigSection i as os :- r) = Just (StringValue i :- as :- os :- r)
 
 data Option = Option Label [Value] [Option]
+  deriving (Eq, Show)
 
 convertOpt :: StringBoomerang (ConfigOption :- r) (Option :- r)
 convertOpt =
@@ -349,34 +352,38 @@ convertOpt =
   fromOpt (Option l vs []) = ConfigOption l vs
   fromOpt (Option l vs os) = ConfigSection l vs (map fromOpt os)
 
-options :: String -> Boomerang StringError String r ([Option] :- r)
+options :: String -> StringBoomerang r ([Option] :- r)
 options indent = (rCons . manyl whiteSpace . convertOpt . option indent <> id) .
-                 rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
-                 manyl eolOrComment
+                  rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
+                  manyl eolOrComment
+
+data Globals = Globals { autoLoadPlugin :: Bool, baseDir :: String }
+  deriving (Eq, Show)
+
 
 -- inspired by: http://www.paolocapriotti.com/blog/2012/04/27/applicative-option-parser/
-data Opt v = Opt { name :: String, optParser :: Maybe Option -> Maybe v }
+data OptionParser v = OptionParser { optParser :: Maybe Option -> Maybe v }
 
-instance Functor Opt where
-  fmap f (Opt n p) = Opt n (fmap (fmap f) p)
+instance Functor OptionParser where
+ fmap f (OptionParser p) = OptionParser (fmap (fmap f) p)
 
 data OptParser a where
   NilP :: a -> OptParser a
-  ConsP :: Opt (b -> a) -> OptParser b -> OptParser a
+  ConsP :: (Maybe Option -> Maybe (b -> a)) -> OptParser b -> OptParser a
 
 instance Functor OptParser where
   fmap f (NilP a) = NilP (f a)
-  fmap f (ConsP opt pb) = ConsP (fmap (fmap f) opt) pb
+  fmap f (ConsP opt pb) = ConsP (fmap (fmap (fmap f)) opt) pb
 
 instance Applicative OptParser where
   pure = NilP
   (<*>) (NilP a2b) (pa) = a2b <$> pa
-  (<*>) (ConsP optb2a2c pb) pa = ConsP (uncurry <$> optb2a2c) ((,) <$> pb <*> pa)
+  (<*>) (ConsP optb2a2c pb) pa = ConsP (fmap (fmap uncurry) optb2a2c) ((,) <$> pb <*> pa)
 
 run :: OptParser a -> [Option] -> Maybe (a, [Option])
 run (NilP a) os  = Just (a, os)
 run (ConsP opt pb) [] = do
-  (b2a, os') <- fmap (flip (,) []) (optParser opt Nothing)
+  (b2a, os') <- fmap (flip (,) []) (opt Nothing)
   run (fmap b2a pb) os'
 run p (o:os) =
   case step p o os of
@@ -386,35 +393,39 @@ run p (o:os) =
 step :: OptParser a -> Option -> [Option] -> Maybe (OptParser a, [Option])
 step p@(NilP _) _ [] = Just (p, [])
 step (NilP _) _ _    = Nothing
-step (ConsP opt@(Opt n o2b2a) pb) option@(Option n' _ _) os =
-  if n == n'
-     then do
-       b2a <- o2b2a (Just option)
-       return (fmap b2a pb, os)
-      else do
-        (pb', os') <- step pb option os
-        return (ConsP opt pb', os')
+step (ConsP o2b2a pb) option@(Option n' _ _) os =
+  case o2b2a (Just option) of
+    Nothing -> do (pb', os') <- step pb option os
+                  return (ConsP o2b2a pb', os')
+    Just b2a -> Just (fmap b2a pb, os)
 
-p :: Opt v -> OptParser v
-p (Opt l v) = ConsP (Opt l (\o -> do r <- v o; return . const $ r)) (NilP ())
+p :: OptionParser v -> OptParser v
+p (OptionParser v) = ConsP (\o -> do r <- v o; return . const $ r) (NilP ())
 
-boolOptPrs :: Label -> Opt Bool
+boolOptPrs :: Label -> OptionParser Bool
 boolOptPrs l =
-  Opt l c
+  OptionParser c
  where
   c (Just (Option l [BooleanValue b] [])) = Just b
   c _                                     = Nothing
 
-strOptPrs :: Label -> Opt String
+strOptPrs :: Label -> OptionParser String
 strOptPrs l =
-  Opt l c
+  OptionParser c
  where
   c (Just (Option _ [StringValue s] [])) = Just s
   c _                                    = Nothing
 
-data Globals = Globals { autoLoadPlugin :: Bool, baseDir :: String }
 
-x = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDir")
+globalsParser = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDir")
+
+globals :: StringBoomerang ([Option] :- r) (Maybe Globals :- r)
+globals =
+  xpure (arg (:-) toGlobals) undefined
+ where
+  --  run :: OptParser a -> [Option] -> Maybe (a, [Option])
+  toGlobals opts = fst <$> run globalsParser opts
+
 
 -- ([Option] -> (a, [Option]))
 
@@ -440,3 +451,5 @@ x = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDi
 --   deriving Show
 
 -- data ConfigOptionParser = {
+
+
