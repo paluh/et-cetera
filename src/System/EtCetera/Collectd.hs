@@ -399,6 +399,19 @@ step (ConsP o2b2a pb) option@(Option n' _ _) os =
                   return (ConsP o2b2a pb', os')
     Just b2a -> Just (fmap b2a pb, os)
 
+-- oa fmap ob = 
+--
+-- Globals -> [Options]
+--
+-- combine :: OptSer o a -> OptSer o b -> OptSer o (a, b)
+-- combine (OptSer o2a oa2r) (OptSer o2b ob2r) = OptSer (\o -> (o2a o, o2b o)) 
+
+-- boolOptSer :: Label -> OptSer Bool r
+-- boolOptSer l = OptSer (\(v :- r) opts -> boolOptSer r (Option l [BooleanValue v] [] : opts))
+
+-- strOptSer :: Label -> OptSer String
+-- strOptSer l = OptSer (\(v, opts) -> Option l [StringValue v] [] : opts)
+
 p :: OptionParser v -> OptParser v
 p (OptionParser v) = ConsP (\o -> do r <- v o; return . const $ r) (NilP ())
 
@@ -413,18 +426,32 @@ strOptPrs :: Label -> OptionParser String
 strOptPrs l =
   OptionParser c
  where
-  c (Just (Option _ [StringValue s] [])) = Just s
+  c (Just (Option l [StringValue s] [])) = Just s
   c _                                    = Nothing
-
 
 globalsParser = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDir")
 
+type ToOption a = (Label -> a -> Option)
+
+toStringOption :: ToOption String
+toStringOption l v = Option l [StringValue v] []
+
+toBooleanOption :: ToOption Bool
+toBooleanOption l v = Option l [BooleanValue v] []
+
+globalsSerializer :: Globals -> [Option]
+globalsSerializer (Globals autoLoadPlugin baseDir) =
+  [ toBooleanOption "autoLoadPlugin" autoLoadPlugin
+  , toStringOption "baseDir" baseDir]
+
 globals :: StringBoomerang ([Option] :- r) (Maybe Globals :- r)
 globals =
-  xpure (arg (:-) toGlobals) undefined
+  xpure (arg (:-) toGlobals) fromGlobals
  where
   --  run :: OptParser a -> [Option] -> Maybe (a, [Option])
-  toGlobals opts = fst <$> run globalsParser opts
+  toGlobals = fmap fst <$> run globalsParser
+  fromGlobals (Just g :- r)  = Just (globalsSerializer g :- r)
+  fromGlobals (Nothing :- r) = Nothing
 
 
 -- ([Option] -> (a, [Option]))
