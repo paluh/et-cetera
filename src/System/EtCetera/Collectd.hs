@@ -16,7 +16,7 @@ import           Control.Category ((.), id)
 import           Data.Char (ord)
 import           Data.Function (on)
 import           Data.List (intersperse)
-import           Data.Maybe (listToMaybe)
+import           Data.Maybe (catMaybes, listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Optional (Optional(..))
 import           Data.Ord (compare, Ordering(..))
@@ -357,7 +357,7 @@ options indent = (rCons . manyl whiteSpace . convertOpt . option indent <> id) .
                   rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
                   manyl eolOrComment
 
-data Globals = Globals { autoLoadPlugin :: Bool, baseDir :: String }
+data Globals = Globals { autoLoadPlugin :: Maybe Bool, baseDir :: String }
   deriving (Eq, Show)
 
 
@@ -402,11 +402,14 @@ step (ConsP o2b2a pb) option@(Option n' _ _) os =
 p :: OptionParser v -> OptParser v
 p (OptionParser v) = ConsP (\o -> do r <- v o; return . const $ r) (NilP ())
 
-boolOptPrs :: Label -> OptionParser Bool
+mp = (Just <$>) <$> p
+
+boolOptPrs :: Label -> OptionParser (Maybe Bool)
 boolOptPrs l =
   OptionParser c
  where
-  c (Just (Option l [BooleanValue b] [])) = Just b
+  c (Just (Option l [BooleanValue b] [])) = Just (Just b)
+  c  Nothing                              = Just Nothing
   c _                                     = Nothing
 
 strOptPrs :: Label -> OptionParser String
@@ -416,8 +419,6 @@ strOptPrs l =
   c (Just (Option l [StringValue s] [])) = Just s
   c _                                    = Nothing
 
-globalsParser = Globals <$> (p . boolOptPrs $ "autoLoadPlugin") <*> (p . strOptPrs $ "baseDir")
-
 type ToOption a = (Label -> a -> Option)
 
 toStringOption :: ToOption String
@@ -426,17 +427,25 @@ toStringOption l v = Option l [StringValue v] []
 toBooleanOption :: ToOption Bool
 toBooleanOption l v = Option l [BooleanValue v] []
 
+globalsParser :: [Option] -> Maybe Globals
+globalsParser =
+  fmap fst <$> run globalsParser
+ where
+  globalsParser =
+    Globals
+      <$> (p . boolOptPrs $ "autoLoadPlugin")
+      <*> (p . strOptPrs $ "baseDir")
+
 globalsSerializer :: Globals -> [Option]
 globalsSerializer (Globals autoLoadPlugin baseDir) =
-  [ toBooleanOption "autoLoadPlugin" autoLoadPlugin
-  , toStringOption "baseDir" baseDir]
+  catMaybes [ toBooleanOption "autoLoadPlugin" <$> autoLoadPlugin
+            , Just $ toStringOption "baseDir" baseDir]
 
 globals :: StringBoomerang ([Option] :- r) (Maybe Globals :- r)
 globals =
-  xpure (arg (:-) toGlobals) fromGlobals
+  xpure (arg (:-) globalsParser) fromGlobals
  where
   --  run :: OptParser a -> [Option] -> Maybe (a, [Option])
-  toGlobals = fmap fst <$> run globalsParser
   fromGlobals (Just g :- r)  = Just (globalsSerializer g :- r)
   fromGlobals (Nothing :- r) = Nothing
 

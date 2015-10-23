@@ -211,9 +211,15 @@ suite = do
             ]
         ] `shouldBe` Just "<LoadPlugin df>\n\tInterval arg1\n\t<Option>\n\t\t<Subsection>\n\t\t\tOption\n\t\t\tOption2\n\t\t\t<Subsubsection>\n\t\t\t\tbleble 999\n\t\t\t</Subsubsection>\n\t\t</Subsection>\n\t</Option>\n</LoadPlugin>"
   describe "EtCetera.Collectd.globals boomerang" $ do
-    it "parses all available globals options" $
+    it "parses globals with all options" $
       parseString (globals . options "") "baseDir \"/home/paluh/collectd/\"\nautoLoadPlugin true" `shouldBe`
-        Right (Just (Globals True "/home/paluh/collectd/"))
-    it "prints globals" $
-      unparseString (globals . options "") (Just (Globals True "/home/paluh/collectd/")) `shouldBe`
+        Right (Just (Globals (Just True) "/home/paluh/collectd/"))
+    it "prints globals with all options" $
+      unparseString (globals . options "") (Just (Globals (Just True) "/home/paluh/collectd/")) `shouldBe`
         Just "autoLoadPlugin true\nbaseDir \"/home/paluh/collectd/\""
+    it "parses globals with missing option" $
+      parseString (globals . options "") "baseDir \"/home/paluh/collectd/\"" `shouldBe`
+        Right (Just (Globals Nothing "/home/paluh/collectd/"))
+    it "prints globals with missing option" $
+      unparseString (globals . options "") (Just (Globals Nothing "/home/paluh/collectd/")) `shouldBe`
+        Just "baseDir \"/home/paluh/collectd/\""
