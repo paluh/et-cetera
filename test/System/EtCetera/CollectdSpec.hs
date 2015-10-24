@@ -6,7 +6,8 @@ module System.EtCetera.CollectdSpec where
 import           Control.Category ((.)) --, id)
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding ((.), id)
-import           System.EtCetera.Collectd (argumentList, comment, globals,
+import           System.EtCetera.Collectd (argumentList, comment, cpu,
+                                           CPU(..), globals,
                                            Globals(..), option, number,
                                            option, ConfigOption(..),
                                            Option(..),
@@ -210,6 +211,7 @@ suite = do
             , Option "Option" [] [Option "Subsection" [] [Option "Option" [] [], Option "Option2" [] [], Option "Subsubsection" [] [Option "bleble" [IntValue 999] []]]]
             ]
         ] `shouldBe` Just "<LoadPlugin df>\n\tInterval arg1\n\t<Option>\n\t\t<Subsection>\n\t\t\tOption\n\t\t\tOption2\n\t\t\t<Subsubsection>\n\t\t\t\tbleble 999\n\t\t\t</Subsubsection>\n\t\t</Subsection>\n\t</Option>\n</LoadPlugin>"
+
   describe "EtCetera.Collectd.globals boomerang" $ do
     it "parses globals with all options" $
       parseString (globals . options "") "baseDir \"/home/paluh/collectd/\"\nautoLoadPlugin true" `shouldBe`
@@ -223,3 +225,20 @@ suite = do
     it "prints globals with missing option" $
       unparseString (globals . options "") (Just (Globals Nothing "/home/paluh/collectd/")) `shouldBe`
         Just "baseDir \"/home/paluh/collectd/\""
+
+
+  describe "EtCetera.Collectd.cpu boomerang" $ do
+    it "prints cpu plugin" $
+      unparseString (cpu . options "") (Just (CPU (Just True) (Just True) Nothing)) `shouldBe`
+        Just ("<Plugin cpu>\n" ++
+                "\tReportByState true\n" ++
+                "\tReportByCPU true\n" ++
+              "</Plugin>")
+    it "parses cpu plugin" $
+      parseString (cpu . options "")
+        ("<Plugin cpu>\n" ++
+            "\tReportByState true\n" ++
+            "\tReportByCPU true\n" ++
+            "\tValuePercentage false\n" ++
+          "</Plugin>") `shouldBe`
+        Right (Just (CPU (Just True) (Just True) (Just False)))

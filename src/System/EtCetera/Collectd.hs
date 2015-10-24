@@ -357,8 +357,6 @@ options indent = (rCons . manyl whiteSpace . convertOpt . option indent <> id) .
                   rList (somel eolOrComment . manyl whiteSpace . convertOpt . option indent) .
                   manyl eolOrComment
 
-data Globals = Globals { autoLoadPlugin :: Maybe Bool, baseDir :: String }
-  deriving (Eq, Show)
 
 
 -- inspired by: http://www.paolocapriotti.com/blog/2012/04/27/applicative-option-parser/
@@ -404,8 +402,8 @@ p (OptionParser v) = ConsP (\o -> do r <- v o; return . const $ r) (NilP ())
 
 mp = (Just <$>) <$> p
 
-boolOptPrs :: Label -> OptionParser (Maybe Bool)
-boolOptPrs l =
+maybeBoolOptPrs :: Label -> OptionParser (Maybe Bool)
+maybeBoolOptPrs l =
   OptionParser c
  where
   c (Just (Option l [BooleanValue b] [])) = Just (Just b)
@@ -427,13 +425,18 @@ toStringOption l v = Option l [StringValue v] []
 toBooleanOption :: ToOption Bool
 toBooleanOption l v = Option l [BooleanValue v] []
 
+
+
+data Globals = Globals { autoLoadPlugin :: Maybe Bool, baseDir :: String }
+  deriving (Eq, Show)
+
 globalsParser :: [Option] -> Maybe Globals
 globalsParser =
   fmap fst <$> run globalsParser
  where
   globalsParser =
     Globals
-      <$> (p . boolOptPrs $ "autoLoadPlugin")
+      <$> (p . maybeBoolOptPrs $ "autoLoadPlugin")
       <*> (p . strOptPrs $ "baseDir")
 
 globalsSerializer :: Globals -> [Option]
@@ -445,9 +448,40 @@ globals :: StringBoomerang ([Option] :- r) (Maybe Globals :- r)
 globals =
   xpure (arg (:-) globalsParser) fromGlobals
  where
-  --  run :: OptParser a -> [Option] -> Maybe (a, [Option])
   fromGlobals (Just g :- r)  = Just (globalsSerializer g :- r)
   fromGlobals (Nothing :- r) = Nothing
+
+data CPU =
+  CPU
+    { reportByState :: Maybe Bool
+    , reportByCPU :: Maybe Bool
+    , valuesPercentage :: Maybe Bool
+    }
+  deriving (Eq, Show)
+
+cpuParser :: [Option] -> Maybe CPU
+cpuParser [Option "Plugin" [StringValue "cpu"] opts] =
+  fmap fst <$> run networkParser' $ opts
+ where
+  networkParser' =
+    CPU
+      <$> (p . maybeBoolOptPrs $ "ReportByState")
+      <*> (p . maybeBoolOptPrs $ "ReportByCPU")
+      <*> (p . maybeBoolOptPrs $ "ValuesPercentage")
+cpuParser _ = Nothing
+
+cpuSerializer :: CPU -> [Option]
+cpuSerializer (CPU rbs rbc vp) =
+  catMaybes [ toBooleanOption "ReportByState" <$> rbs
+            , toBooleanOption "ReportByCPU" <$> rbc
+            , toBooleanOption "ValuesPercentage" <$> vp]
+
+cpu :: StringBoomerang ([Option] :- r) (Maybe CPU :- r)
+cpu =
+  xpure (arg (:-) cpuParser) cpuSerializer'
+ where
+  cpuSerializer' (Just c :- r)  = Just ([Option "Plugin" [StringValue "cpu"] (cpuSerializer c)] :- r)
+  cpuSerializer' (Nothing :- r) = Nothing
 
 
 -- ([Option] -> (a, [Option]))
