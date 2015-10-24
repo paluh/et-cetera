@@ -322,7 +322,7 @@ option indent =
 
   option' :: StringBoomerang r (ConfigOption :- r)
   option' =
-    assembleConfigOption . identifier . argumentList . push []
+    assembleConfigOption . identifier . argumentList . manyl whiteSpace . push []
 
   section' indent = assembleConfigOption . lit "<" . identifier . argumentList . manyl whiteSpace . lit ">" .  options' indent
 

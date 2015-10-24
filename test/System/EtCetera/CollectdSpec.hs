@@ -237,8 +237,10 @@ suite = do
     it "parses cpu plugin" $
       parseString (cpu . options "")
         ("<Plugin cpu>\n" ++
-            "\tReportByState true\n" ++
-            "\tReportByCPU true\n" ++
+            "ReportByState true\n" ++
+            "\n" ++
+            " #some comment  \n" ++
+            " ReportByCPU true  \n" ++
             "\tValuePercentage false\n" ++
           "</Plugin>") `shouldBe`
         Right (Just (CPU (Just True) (Just True) (Just False)))
