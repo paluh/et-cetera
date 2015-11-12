@@ -6,8 +6,8 @@ module System.EtCetera.CollectdSpec where
 import           Control.Category ((.)) --, id)
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding ((.), id)
-import           System.EtCetera.Collectd (argumentList, comment, cpu,
-                                           CPU(..), globals,
+import           System.EtCetera.Collectd (argumentList, comment, cpu, CPU(..),
+                                           disk, Disk(..), foldStringOption, globals,
                                            Globals(..), option, number,
                                            option, ConfigOption(..),
                                            Option(..),
@@ -242,5 +242,22 @@ suite = do
             " #some comment  \n" ++
             " ReportByCPU true  \n" ++
             "\tValuePercentage false\n" ++
-          "</Plugin>") `shouldBe`
+          "</Plugin>  \n  \n") `shouldBe`
         Right (Just (CPU (Just True) (Just True) (Just False)))
+
+  describe "EtCetera.Collectd.foldStringOption" $ do
+    it "aggregates values correctly" $
+      parseString (foldStringOption "Disk" . options "")
+        ("Disk sdd\n" ++
+         "Disk \"/hda[34]/\"\n" ++
+         "Disk sda8\n") `shouldBe`
+        Right (Just [Option "Disk" [StringListValue ["sdd", "/hda[34]/", "sda8"]] []])
+    it "aggregates values correctly" $
+      parseString (disk . options "")
+        ("Disk sdd\n" ++
+         "Disk \"/hda[34]/\"\n" ++
+         "Disk sda8\n" ++
+         "IgnoreSelected true\n" ++
+         "UseBSDName false\n" ++
+         "UdevNameAttr \"DM_NAME\"") `shouldBe`
+        Right (Just (Disk ["sdd", "/hda[34]/", "sda8"] (Just True) (Just False) (Just "DM_NAME")))

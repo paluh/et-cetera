@@ -15,7 +15,7 @@ import           Control.Arrow (first)
 import           Control.Category ((.), id)
 import           Data.Char (ord)
 import           Data.Function (on)
-import           Data.List (intersperse)
+import           Data.List (intersperse, partition)
 import           Data.Maybe (catMaybes, listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Optional (Optional(..))
@@ -57,7 +57,7 @@ eol :: StringBoomerang r r
 eol = lit "\n" <> lit "\r\n"
 
 eolOrComment :: StringBoomerang r r
-eolOrComment = comment <> eol
+eolOrComment = manyl whiteSpace . (comment <> eol)
 
 data QuotedStringPart = Escaped String | Literal String
   deriving (Eq, Show)
@@ -273,6 +273,7 @@ data Value = BooleanValue Bool
            | FloatValue Float
            | IntValue Int
            | StringValue String
+           | StringListValue [String]
   deriving (Show, Eq)
 
 argument :: StringBoomerang r (Value :- r)
@@ -296,7 +297,7 @@ option indent =
  where
   pf =
     Parser $ \tok pos ->
-      case parse1Partial (rPair . section' indent . lit "</" . identifier . lit ">") tok pos of
+      case parse1Partial (rPair . section' indent . lit "</" . identifier . lit ">" . manyl whiteSpace) tok pos of
         Right (((opt, StringValue closingTag), tok'), pos') ->
           let label = optionLabel opt
           in if label == closingTag
@@ -410,12 +411,27 @@ maybeBoolOptPrs l =
   c  Nothing                              = Just Nothing
   c _                                     = Nothing
 
+maybeStrOptPrs :: Label -> OptionParser (Maybe String)
+maybeStrOptPrs l =
+  OptionParser c
+ where
+  c (Just (Option l [StringValue s] [])) = Just (Just s)
+  c  Nothing                             = Just Nothing
+  c _                                    = Nothing
+
 strOptPrs :: Label -> OptionParser String
 strOptPrs l =
   OptionParser c
  where
   c (Just (Option l [StringValue s] [])) = Just s
   c _                                    = Nothing
+
+strLstPrs :: Label -> OptionParser [String]
+strLstPrs l =
+   OptionParser c
+ where
+  c (Just (Option l [StringListValue s] [])) = Just s
+  c _                                        = Nothing
 
 type ToOption a = (Label -> a -> Option)
 
@@ -425,6 +441,8 @@ toStringOption l v = Option l [StringValue v] []
 toBooleanOption :: ToOption Bool
 toBooleanOption l v = Option l [BooleanValue v] []
 
+toStringListOption :: ToOption [String]
+toStringListOption l v = Option l [StringListValue v] []
 
 
 data Globals = Globals { autoLoadPlugin :: Maybe Bool, baseDir :: String }
@@ -461,9 +479,9 @@ data CPU =
 
 cpuParser :: [Option] -> Maybe CPU
 cpuParser [Option "Plugin" [StringValue "cpu"] opts] =
-  fmap fst <$> run networkParser' $ opts
+  fmap fst <$> run cpuParser' $ opts
  where
-  networkParser' =
+  cpuParser' =
     CPU
       <$> (p . maybeBoolOptPrs $ "ReportByState")
       <*> (p . maybeBoolOptPrs $ "ReportByCPU")
@@ -483,6 +501,54 @@ cpu =
   cpuSerializer' (Just c :- r)  = Just ([Option "Plugin" [StringValue "cpu"] (cpuSerializer c)] :- r)
   cpuSerializer' (Nothing :- r) = Nothing
 
+foldStringOption :: Label -> StringBoomerang ([Option] :- r) (Maybe [Option] :- r)
+foldStringOption l =
+  xpure (arg (:-) (foldStringOption' l)) undefined
+ where
+  foldStringOption' :: Label -> [Option] -> Maybe [Option]
+  foldStringOption' l opts =
+    do v' <- combine o
+       return (Option l [StringListValue v'] [] : r)
+   where
+    (o, r) = partition (\(Option l' _ _) -> l == l') opts
+    combine :: [Option] -> Maybe [String]
+    combine [] = return []
+    combine (x:xs) =
+      case x of
+        (Option l [StringValue s] []) -> do r <- combine xs
+                                            return (s : r)
+        otherwise                     -> Nothing
+
+
+disk :: StringBoomerang ([Option] :- r) (Maybe Disk :- r)
+disk =
+  xpure (arg (:-) diskParser) undefined . foldStringOption "Disk"
+ where
+  diskParser :: Maybe [Option] -> Maybe Disk
+  diskParser opt = do
+    v <- opt
+    diskParser' v
+  diskParser' = fmap fst <$> run (Disk
+    <$> (p . strLstPrs $ "Disk")
+    <*> (p . maybeBoolOptPrs $ "IgnoreSelected")
+    <*> (p . maybeBoolOptPrs $ "UseBSDName")
+    <*> (p . maybeStrOptPrs $ "UdevNameAttr"))
+
+-- cpuSerializer :: CPU -> [Option]
+-- cpuSerializer (CPU rbs rbc vp) =
+--   catMaybes [ toBooleanOption "ReportByState" <$> rbs
+--             , toBooleanOption "ReportByCPU" <$> rbc
+--             , toBooleanOption "ValuesPercentage" <$> vp]
+
+
+data Disk =
+  Disk
+    { name :: [String]
+    , ignoreSelected :: Maybe Bool
+    , useBSDName :: Maybe Bool
+    , udevNameAttr :: Maybe String
+    }
+  deriving (Eq, Show)
 
 -- ([Option] -> (a, [Option]))
 
