@@ -254,10 +254,12 @@ suite = do
         Right (Just [Option "Disk" [StringListValue ["sdd", "/hda[34]/", "sda8"]] []])
     it "aggregates values correctly" $
       parseString (disk . options "")
-        ("Disk sdd\n" ++
+        ("<Plugin disk>\n" ++
+         "Disk sdd\n" ++
          "Disk \"/hda[34]/\"\n" ++
          "Disk sda8\n" ++
          "IgnoreSelected true\n" ++
          "UseBSDName false\n" ++
-         "UdevNameAttr \"DM_NAME\"") `shouldBe`
+         "UdevNameAttr \"DM_NAME\"" ++
+         "</Plugin>") `shouldBe`
         Right (Just (Disk ["sdd", "/hda[34]/", "sda8"] (Just True) (Just False) (Just "DM_NAME")))

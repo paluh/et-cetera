@@ -504,30 +504,30 @@ cpu =
 foldStringOption :: Label -> StringBoomerang ([Option] :- r) (Maybe [Option] :- r)
 foldStringOption l =
   xpure (arg (:-) (foldStringOption' l)) undefined
- where
-  foldStringOption' :: Label -> [Option] -> Maybe [Option]
-  foldStringOption' l opts =
-    do v' <- combine o
-       return (Option l [StringListValue v'] [] : r)
-   where
-    (o, r) = partition (\(Option l' _ _) -> l == l') opts
-    combine :: [Option] -> Maybe [String]
-    combine [] = return []
-    combine (x:xs) =
-      case x of
-        (Option l [StringValue s] []) -> do r <- combine xs
-                                            return (s : r)
-        otherwise                     -> Nothing
 
+foldStringOption' :: Label -> [Option] -> Maybe [Option]
+foldStringOption' l opts =
+  do v' <- combine o
+     return (Option l [StringListValue v'] [] : r)
+ where
+  (o, r) = partition (\(Option l' _ _) -> l == l') opts
+  combine :: [Option] -> Maybe [String]
+  combine [] = return []
+  combine (x:xs) =
+    case x of
+      (Option l [StringValue s] []) -> do r <- combine xs
+                                          return (s : r)
+      otherwise                     -> Nothing
 
 disk :: StringBoomerang ([Option] :- r) (Maybe Disk :- r)
 disk =
-  xpure (arg (:-) diskParser) undefined . foldStringOption "Disk"
+  xpure (arg (:-) diskParser) undefined
  where
-  diskParser :: Maybe [Option] -> Maybe Disk
-  diskParser opt = do
-    v <- opt
-    diskParser' v
+  diskParser :: [Option] -> Maybe Disk
+  diskParser v =
+    case v of
+      [Option "Plugin" [StringValue "disk"] opts] -> foldStringOption' "Disk" opts >>= diskParser'
+      otherwise                                   -> Nothing
   diskParser' = fmap fst <$> run (Disk
     <$> (p . strLstPrs $ "Disk")
     <*> (p . maybeBoolOptPrs $ "IgnoreSelected")
