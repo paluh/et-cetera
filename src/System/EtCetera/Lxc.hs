@@ -4,6 +4,7 @@ module System.EtCetera.Lxc where
 
 import           Control.Arrow (first)
 import           Control.Category ((.), id)
+import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
@@ -11,14 +12,17 @@ import           Prelude hiding ((.))
 import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
 import           Text.Boomerang.HStack (arg, (:-)(..))
 import           Text.Boomerang.Prim (xpure)
-import           Text.Boomerang.String (anyChar, char, lit, satisfy, StringBoomerang)
+import           Text.Boomerang.String (anyChar, char, lit, parseString,
+                                        satisfy, StringBoomerang, StringError)
 
 type Key = String
 data Switch = On | Off
   deriving (Eq, Show)
-data Value = ValueText String
-           | ValueInt Int
-           | ValueSwitch Switch
+data Value = VText String
+           | VInt Int
+           | VSwitch Switch
+           -- used to combine options: environment, include
+           | VListOfTextValues [String]
   deriving (Eq, Show)
 data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
   deriving (Eq, Show)
@@ -40,20 +44,20 @@ value :: StringBoomerang r (String :- r)
 value = rCons . noneOf "\n\r \t" . rList1 anyChar
 
 text :: StringBoomerang r (Value :- r)
-text = xpure (arg (:-) ValueText)
+text = xpure (arg (:-) VText)
              (\case
-                (ValueText t :- r) -> Just (t :- r)
+                (VText t :- r) -> Just (t :- r)
                 otherwise          -> Nothing)
      . value
 
 switch :: StringBoomerang r (Value :- r)
 switch = xpure (arg (:-) (\case
-                            '0' -> ValueSwitch Off
-                            '1' -> ValueSwitch On))
-             (\case
-                (ValueSwitch On :- r) -> Just ('1' :- r)
-                (ValueSwitch Off :- r) -> Just ('0' :- r)
-                otherwise          -> Nothing)
+                            '0' -> VSwitch Off
+                            '1' -> VSwitch On))
+               (\case
+                  (VSwitch On :- r)  -> Just ('1' :- r)
+                  (VSwitch Off :- r) -> Just ('0' :- r)
+                  otherwise          -> Nothing)
        . oneOf "01"
 
 -- options list taken from here:
@@ -163,34 +167,38 @@ configLines =
      (rCons . nonEmptyConfigLine . (eol . configLines <> push []))
   <> (rCons . emptyLine . eol . configLines <> manyl whiteSpace . push [])
 
--- This really simple version of modification API
--- keeps only options values and skips the rest
--- configOptions :: StringBoomerang (HashMap LxcOption) r ([ConfigLine] :- r)
--- configOptions = 
+-- serToOptionList :: HashMap.HashMap String (OptionValue) -> [ConfigLine]
+-- serToOptionList = undefined
 
+data ParseError = MultipleOccurencesOfScalarOption String
+                | ParserError StringError
+  deriving (Eq, Show)
 
--- XXX: migrate to type safty
--- this is really buggy version with just texts as types
--- convert appropriate options to concrete types and define
--- appropriate serialization functions
--- data LxcOption =
---     LxcAaAllowIncompete Text | LxcAaProfile Text | LxcArch Text | LxcAutodev Text
---   | LxcCapDrop Text | LxcCapKeep Text | LxcCgroup Text | LxcConsole Text
---   | LxcConsoleLogfile Text | LxcDevTtyDir Text | LxcEnvironment Text
---   | LxcEphemeral Text | LxcGroup Text | LxcHaltSignal Text
---   | LxcHook Text | LxcHookAutodev Text | LxcHookClone Text | LxcHookDestroy Text
---   | LxcHookMount Text | LxcHookPostStop Text | LxcHookPreMount Text | LxcHookPreStart Text
---   | LxcHookStart Text | LxcHookStop Text | LxcIdMap Text | LxcInclude Text | LxcInitCmd Text
---   | LxcInitGid Text | LxcInitUid Text | LxcKmsg Text | LxcLogfile Text | LxcLoglevel Text
---   | LxcMonitorUnshare Text | LxcMount Text | LxcMountAuto Text | LxcMountEntry Text
---   | LxcNetwork Text |  LxcNetworkFlags Text | LxcNetworkHwaddr Text
---   | LxcNetworkIpv4 Text | LxcNetworkIpv4.gateway Text | LxcNetwork.ipv6 Text
---   | LxcNetwork.ipv6.gateway Text | LxcNetwork.link Text | LxcNetwork.macvlan.mode Text
---   | LxcNetwork.mtu Text | LxcNetwork.name Text | LxcNetwork.script.down Text
---   | LxcNetwork.script.up Text | LxcNetwork.type Text | LxcNetwork.veth.pair Text
---   | LxcNetwork.vlan.id Text | Lxc.pivotdir Text | Lxc.pts Text | Lxc.rebootsignal Text
---   | Lxc.rootfs Text | Lxc.rootfs.mount Text | Lxc.rootfs.options Text | Lxc.se_context Text
---   | Lxc.seccomp Text | Lxc.start.auto Text | Lxc.start.delay Text | Lxc.start.order Text
---   | Lxc.stopsignal Text | Lxc.tty Text | Lxc.utsname Text 
--- option :: StringBoomerang (LxcOption :- r) (String :- r)
--- option =
+-- convert list of config lines into hash map of options
+-- some options are combined in really ugly manner ;-)
+prsToOptionMap ::  [ConfigLine] -> Either ParseError (HashMap.HashMap Key Value)
+prsToOptionMap =
+  foldl' addOption (Right HashMap.empty)
+ where
+  addOption :: Either ParseError (HashMap.HashMap Key Value) ->
+               ConfigLine -> Either ParseError (HashMap.HashMap Key Value)
+  addOption ehm cl = do
+    hm <- ehm
+    case cl of
+      (OptionLine k v) | k `HashMap.member` hm && not (isListOfValues k)
+                          -> throwError (MultipleOccurencesOfScalarOption k)
+                       | k `HashMap.member` hm && isListOfValues k -> do
+                          let (VText t) = v
+                          return (HashMap.adjust (\(VListOfTextValues l) -> VListOfTextValues (t:l)) k hm)
+                       | isListOfValues k -> do
+                          let (VText t) = v
+                          return (HashMap.insert k  (VListOfTextValues [t]) hm)
+                       | otherwise -> return (HashMap.insert k v hm)
+      otherwise -> ehm
+  isListOfValues :: Key -> Bool
+  isListOfValues k = k `elem` ["lxc.include", "lxc.environment"]
+
+parseConfig :: String -> Either ParseError (HashMap.HashMap Key Value)
+parseConfig conf =
+  let ep = parseString configLines conf
+  in either (Left . ParserError) prsToOptionMap ep

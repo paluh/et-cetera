@@ -21,6 +21,7 @@ library
                       , boomerang
                       , hspec
                       , iproute
+                      , mtl
                       , optional-args
                       , semigroups
                       , unordered-containers
@@ -39,6 +40,7 @@ test-suite et-cetera-test
                      , et-cetera
                      , hspec
                      , iproute
+                     , mtl
                      , semigroups
                      , unordered-containers
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
