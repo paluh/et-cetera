@@ -14,8 +14,11 @@ import           Text.Boomerang.Prim (xpure)
 import           Text.Boomerang.String (anyChar, char, lit, satisfy, StringBoomerang)
 
 type Key = String
+data Switch = On | Off
+  deriving (Eq, Show)
 data Value = ValueText String
            | ValueInt Int
+           | ValueSwitch Switch
   deriving (Eq, Show)
 data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
   deriving (Eq, Show)
@@ -36,23 +39,34 @@ word (x:xs) = rCons . char x . word xs
 value :: StringBoomerang r (String :- r)
 value = rCons . noneOf "\n\r \t" . rList1 anyChar
 
-text :: StringBoomerang (String :-r) (Value :- r)
+text :: StringBoomerang r (Value :- r)
 text = xpure (arg (:-) ValueText)
              (\case
                 (ValueText t :- r) -> Just (t :- r)
                 otherwise          -> Nothing)
+     . value
 
--- keys list taken from here:
+switch :: StringBoomerang r (Value :- r)
+switch = xpure (arg (:-) (\case
+                            '0' -> ValueSwitch Off
+                            '1' -> ValueSwitch On))
+             (\case
+                (ValueSwitch On :- r) -> Just ('1' :- r)
+                (ValueSwitch Off :- r) -> Just ('0' :- r)
+                otherwise          -> Nothing)
+       . oneOf "01"
+
+-- options list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
 optionLine :: StringBoomerang r (ConfigLine :- r)
 optionLine =
   foldl' (<>) mempty
     (map (\(l, vp) -> option . word l . manyl whiteSpace
-                   .  lit "=" . manyl whiteSpace . vp . value)
+                   .  lit "=" . manyl whiteSpace . vp)
       [ ("lxc.aa_allow_incomplete", text)
       , ("lxc.aa_profile", text)
       , ("lxc.arch", text)
-      , ("lxc.autodev", text)
+      , ("lxc.autodev", switch)
       , ("lxc.cap.drop", text)
       , ("lxc.cap.keep", text)
       , ("lxc.cgroup", text)
@@ -78,7 +92,7 @@ optionLine =
       , ("lxc.init_cmd", text)
       , ("lxc.init_gid", text)
       , ("lxc.init_uid", text)
-      , ("lxc.kmsg", text)
+      , ("lxc.kmsg", switch)
       , ("lxc.logfile", text)
       , ("lxc.loglevel", text)
       , ("lxc.monitor.unshare", text)

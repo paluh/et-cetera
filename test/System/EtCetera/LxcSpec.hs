@@ -45,6 +45,13 @@ suite = -- do
               , OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")
               , CommentLine " another comment "
               , EmptyLine]
+    it "parses switch value correctly" $
+      parseString configLines (unlines [ "lxc.autodev = 1"
+                                       , "# another comment "
+                                       ]) `shouldBe`
+        Right [ OptionLine "lxc.rootfs" (ValueSwitch On)
+              , CommentLine " another comment "
+              ]
     it "prints option line" $
       unparseString configLines
                     [ CommentLine "comment "
