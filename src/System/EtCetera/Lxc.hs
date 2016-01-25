@@ -2,7 +2,9 @@
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.Lxc where
 
+import           Control.Arrow (first)
 import           Control.Category ((.), id)
+import qualified Data.HashMap.Strict as HashMap
 import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
 import           Prelude hiding ((.))
@@ -12,7 +14,9 @@ import           Text.Boomerang.Prim (xpure)
 import           Text.Boomerang.String (anyChar, char, lit, satisfy, StringBoomerang)
 
 type Key = String
-type Value = String
+data Value = ValueText String
+           | ValueInt Int
+  deriving (Eq, Show)
 data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
   deriving (Eq, Show)
 
@@ -32,28 +36,124 @@ word (x:xs) = rCons . char x . word xs
 value :: StringBoomerang r (String :- r)
 value = rCons . noneOf "\n\r \t" . rList1 anyChar
 
+text :: StringBoomerang (String :-r) (Value :- r)
+text = xpure (arg (:-) ValueText)
+             (\case
+                (ValueText t :- r) -> Just (t :- r)
+                otherwise          -> Nothing)
+
 -- keys list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
-key :: StringBoomerang r (String :- r)
-key = foldl' (<>) mempty (map word
-      [ "lxc.aa_allow_incomplete", "lxc.aa_profile", "lxc.arch", "lxc.autodev"
-      , "lxc.cap.drop", "lxc.cap.keep", "lxc.cgroup", "lxc.console", "lxc.console.logfile"
-      , "lxc.devttydir", "lxc.environment", "lxc.ephemeral", "lxc.group", "lxc.haltsignal"
-      , "lxc.hook", "lxc.hook.autodev", "lxc.hook.clone", "lxc.hook.destroy"
-      , "lxc.hook.mount", "lxc.hook.post-stop", "lxc.hook.pre-mount", "lxc.hook.pre-start"
-      , "lxc.hook.start", "lxc.hook.stop", "lxc.id_map", "lxc.include", "lxc.init_cmd"
-      , "lxc.init_gid", "lxc.init_uid", "lxc.kmsg", "lxc.logfile", "lxc.loglevel"
-      , "lxc.monitor.unshare", "lxc.mount", "lxc.mount.auto", "lxc.mount.entry"
-      , "lxc.network", "lxc.network.", "lxc.network.flags", "lxc.network.hwaddr"
-      , "lxc.network.ipv4", "lxc.network.ipv4.gateway", "lxc.network.ipv6"
-      , "lxc.network.ipv6.gateway", "lxc.network.link", "lxc.network.macvlan.mode"
-      , "lxc.network.mtu", "lxc.network.name", "lxc.network.script.down"
-      , "lxc.network.script.up", "lxc.network.type", "lxc.network.veth.pair"
-      , "lxc.network.vlan.id", "lxc.pivotdir", "lxc.pts", "lxc.rebootsignal"
-      , "lxc.rootfs", "lxc.rootfs.mount", "lxc.rootfs.options", "lxc.se_context"
-      , "lxc.seccomp", "lxc.start.auto", "lxc.start.delay", "lxc.start.order"
-      , "lxc.stopsignal", "lxc.tty", "lxc.utsname"
+optionLine :: StringBoomerang r (ConfigLine :- r)
+optionLine =
+  foldl' (<>) mempty
+    (map (\(l, vp) -> option . word l . manyl whiteSpace
+                   .  lit "=" . manyl whiteSpace . vp . value)
+      [ ("lxc.aa_allow_incomplete", text)
+      , ("lxc.aa_profile", text)
+      , ("lxc.arch", text)
+      , ("lxc.autodev", text)
+      , ("lxc.cap.drop", text)
+      , ("lxc.cap.keep", text)
+      , ("lxc.cgroup", text)
+      , ("lxc.console", text)
+      , ("lxc.console.logfile", text)
+      , ("lxc.devttydir", text)
+      , ("lxc.environment", text)
+      , ("lxc.ephemeral", text)
+      , ("lxc.group", text)
+      , ("lxc.haltsignal", text)
+      , ("lxc.hook", text)
+      , ("lxc.hook.autodev", text)
+      , ("lxc.hook.clone", text)
+      , ("lxc.hook.destroy", text)
+      , ("lxc.hook.mount", text)
+      , ("lxc.hook.post-stop", text)
+      , ("lxc.hook.pre-mount", text)
+      , ("lxc.hook.pre-start", text)
+      , ("lxc.hook.start", text)
+      , ("lxc.hook.stop", text)
+      , ("lxc.id_map", text)
+      , ("lxc.include", text)
+      , ("lxc.init_cmd", text)
+      , ("lxc.init_gid", text)
+      , ("lxc.init_uid", text)
+      , ("lxc.kmsg", text)
+      , ("lxc.logfile", text)
+      , ("lxc.loglevel", text)
+      , ("lxc.monitor.unshare", text)
+      , ("lxc.mount", text)
+      , ("lxc.mount.auto", text)
+      , ("lxc.mount.entry", text)
+      , ("lxc.network", text)
+      , ("lxc.network.", text)
+      , ("lxc.network.flags", text)
+      , ("lxc.network.hwaddr", text)
+      , ("lxc.network.ipv4", text)
+      , ("lxc.network.ipv4.gateway", text)
+      , ("lxc.network.ipv6", text)
+      , ("lxc.network.ipv6.gateway", text)
+      , ("lxc.network.link", text)
+      , ("lxc.network.macvlan.mode", text)
+      , ("lxc.network.mtu", text)
+      , ("lxc.network.name", text)
+      , ("lxc.network.script.down", text)
+      , ("lxc.network.script.up", text)
+      , ("lxc.network.type", text)
+      , ("lxc.network.veth.pair", text)
+      , ("lxc.network.vlan.id", text)
+      , ("lxc.pivotdir", text)
+      , ("lxc.pts", text)
+      , ("lxc.rebootsignal", text)
+      , ("lxc.rootfs", text)
+      , ("lxc.rootfs.mount", text)
+      , ("lxc.rootfs.options", text)
+      , ("lxc.se_context", text)
+      , ("lxc.seccomp", text)
+      , ("lxc.start.auto", text)
+      , ("lxc.start.delay", text)
+      , ("lxc.start.order", text)
+      , ("lxc.stopsignal", text)
+      , ("lxc.tty", text)
+      , ("lxc.utsname", text)
       ])
+ where
+  option = xpure (arg (arg (:-)) OptionLine)
+                 (\case
+                    (OptionLine k v :- r) -> Just (k :- v :- r)
+                    otherwise -> Nothing)
+
+whiteSpace :: StringBoomerang r r
+whiteSpace = lit " " <> lit "\t"
+
+nonEmptyConfigLine :: StringBoomerang r (ConfigLine :- r)
+nonEmptyConfigLine =
+     comment
+  <> optionLine
+ where
+  comment = xpure (arg (:-) CommentLine)
+                  (\case
+                    (CommentLine c :- r) -> Just (c :- r)
+                    otherwise -> Nothing)
+          . manyl whiteSpace . lit "#" . rList (noneOf "\n")
+
+emptyLine = xpure (\r -> EmptyLine :- r)
+                  (\case
+                    (EmptyLine :- r) -> Just r
+                    otherwise        -> Nothing)
+          . manyl whiteSpace
+
+configLines :: StringBoomerang r ([ConfigLine] :- r)
+configLines =
+  -- to simplify last new line parsing I've split empty line case
+     (rCons . nonEmptyConfigLine . (eol . configLines <> push []))
+  <> (rCons . emptyLine . eol . configLines <> manyl whiteSpace . push [])
+
+-- This really simple version of modification API
+-- keeps only options values and skips the rest
+-- configOptions :: StringBoomerang (HashMap LxcOption) r ([ConfigLine] :- r)
+-- configOptions = 
+
 
 -- XXX: migrate to type safty
 -- this is really buggy version with just texts as types
@@ -80,38 +180,3 @@ key = foldl' (<>) mempty (map word
 --   | Lxc.stopsignal Text | Lxc.tty Text | Lxc.utsname Text 
 -- option :: StringBoomerang (LxcOption :- r) (String :- r)
 -- option =
-
-
-
-whiteSpace :: StringBoomerang r r
-whiteSpace = lit " " <> lit "\t"
-
-nonEmptyConfigLine :: StringBoomerang r (ConfigLine :- r)
-nonEmptyConfigLine =
-     comment
-  <> (option . key . manyl whiteSpace . lit "=" . manyl whiteSpace . value)
- where
-  option = xpure (arg (arg (:-)) OptionLine)
-                 (\case
-                    (OptionLine k v :- r) -> Just (k :- v :- r)
-                    otherwise -> Nothing)
-  comment = xpure (arg (:-) CommentLine)
-                  (\case
-                    (CommentLine c :- r) -> Just (c :- r)
-                    otherwise -> Nothing)
-          . manyl whiteSpace . lit "#" . rList (noneOf "\n")
-
-emptyLine = xpure (\r -> EmptyLine :- r)
-                  (\case
-                    (EmptyLine :- r) -> Just r
-                    otherwise        -> Nothing)
-          . manyl whiteSpace
-
-configLines :: StringBoomerang r ([ConfigLine] :- r)
-configLines =
-  -- to simplify last new line parsing I've split empty line case
-     (rCons . nonEmptyConfigLine . (eol . configLines <> push []))
-  <> (rCons . emptyLine . eol . configLines <> manyl whiteSpace . push [])
-
-
-

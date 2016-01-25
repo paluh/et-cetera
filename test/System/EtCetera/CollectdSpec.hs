@@ -75,7 +75,7 @@ suite = do
         `shouldBe` Just "\"\\\"\""
     it "prints escaped sequences correctly" $
       unparseString quotedString [Escaped "\"\""]
-        `shouldBe` Just "\"\\\"\\\"\""
+        `shouldBe` Just "\"\\\"\\\"\\\"\\\"\""
     it "prints literal which ends with escape sequence" $
       unparseString quotedString [Literal "smells like", Escaped "\""]
         `shouldBe` Just "\"smells like\\\"\""

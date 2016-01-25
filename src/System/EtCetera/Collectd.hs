@@ -6,6 +6,10 @@
 
 module System.EtCetera.Collectd where
 
+-- XXX: 
+-- I'm going to drop this crazy applicative parse version and
+-- just generate hash map
+
 -- Based directly on:
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/parser.y
 --  https://github.com/collectd/collectd/blob/master/src/liboconfig/scanner.l
@@ -539,7 +543,6 @@ disk =
 --   catMaybes [ toBooleanOption "ReportByState" <$> rbs
 --             , toBooleanOption "ReportByCPU" <$> rbc
 --             , toBooleanOption "ValuesPercentage" <$> vp]
-
 
 data Disk =
   Disk

@@ -18,25 +18,28 @@ library
   -- other-modules:
   -- other-extensions:
   build-depends:        base >=4.8 && <4.9
-                      , semigroups
                       , boomerang
-                      , iproute
                       , hspec
+                      , iproute
                       , optional-args
+                      , semigroups
+                      , unordered-containers
   hs-source-dirs:     src, test
   default-language:   Haskell2010
   exposed-modules:      System.EtCetera.Interfaces
                       , System.EtCetera.Collectd
+                      , System.EtCetera.Lxc
 
 test-suite et-cetera-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
-  build-depends:        base >=4.8 && <4.9
-                      , semigroups
-                      , boomerang
-                      , iproute
-                      , hspec
-                      , et-cetera
+  build-depends:       base >=4.8 && <4.9
+                     , boomerang
+                     , et-cetera
+                     , hspec
+                     , iproute
+                     , semigroups
+                     , unordered-containers
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:     Haskell2010

@@ -4,7 +4,7 @@
 
 module System.EtCetera.LxcSpec where
 
-import           System.EtCetera.Lxc (configLines, ConfigLine(..))
+import           System.EtCetera.Lxc (configLines, ConfigLine(..), Value(..))
 import           Text.Boomerang.String (parseString, unparseString)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -13,10 +13,10 @@ suite = -- do
   describe "System.EtCetera.Lxc boomerang" $ do
     it "parses single option line with new line char at the end" $
       parseString configLines "lxc.rootfs = /mnt/rootfs.complex\n" `shouldBe`
-        Right [OptionLine "lxc.rootfs" "/mnt/rootfs.complex"]
+        Right [OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")]
     it "parses single option line without new line char at the end" $
       parseString configLines "lxc.rootfs = /mnt/rootfs.complex" `shouldBe`
-        Right [OptionLine "lxc.rootfs" "/mnt/rootfs.complex"]
+        Right [OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")]
     it "parses comment line correctly" $
       parseString configLines "# some comment\n" `shouldBe`
         Right [CommentLine " some comment"]
@@ -30,7 +30,7 @@ suite = -- do
       parseString configLines (unlines [ "lxc.rootfs = /mnt/rootfs.complex"
                                        , "# another comment "
                                        ]) `shouldBe`
-        Right [ OptionLine "lxc.rootfs" "/mnt/rootfs.complex"
+        Right [ OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")
               , CommentLine " another comment "
               ]
     it "parses multiple mixed lines correctly" $
@@ -42,14 +42,14 @@ suite = -- do
                                        ]) `shouldBe`
         Right [ CommentLine "comment "
               , EmptyLine
-              , OptionLine "lxc.rootfs" "/mnt/rootfs.complex"
+              , OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")
               , CommentLine " another comment "
               , EmptyLine]
     it "prints option line" $
       unparseString configLines
                     [ CommentLine "comment "
                     , EmptyLine
-                    , OptionLine "lxc.rootfs" "/mnt/rootfs.complex"
+                    , OptionLine "lxc.rootfs" (ValueText "/mnt/rootfs.complex")
                     , CommentLine " another comment "
                     , EmptyLine
                     ] `shouldBe`
