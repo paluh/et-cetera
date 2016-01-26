@@ -3,11 +3,10 @@
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.LxcSpec where
 
-import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..),
-                                               emptyConfig, LxcConfig, parse,
-                                               serialize, SerializtionError(..),
-                                               Switch(..), Value(..), lxcInclude,
-                                               lxcRootfs)
+import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..), emptyConfig, LxcConfig,
+                                               NetworkType(..), parse, serialize,
+                                               SerializtionError(..), Switch(..), Value(..),
+                                               lxcInclude, lxcNetworkType, lxcRootfs)
 import           Text.Boomerang.String (parseString, unparseString)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -69,7 +68,7 @@ suite = do
                         , "# another comment "
                         , ""
                         ])
-  describe "System.EtCetera.Lxc parsing function" $ -- do
+  describe "System.EtCetera.Lxc parsing function" $ do
     it "parses multiple mixed lines correctly" $
       parse (unlines [ "#comment "
                      , "lxc.include = /var/lib/lxc/lxc-common.conf"
@@ -82,6 +81,9 @@ suite = do
                                             , "/var/lib/lxc/lxc-common.conf"]
                              , lxcRootfs =  Just "/mnt/rootfs.complex"
                              })
+    it "parses network type correctly" $
+      parse "lxc.network.type = macvlan" `shouldBe`
+        (Right $ emptyConfig { lxcNetworkType = Just Macvlan})
   describe "System.EtCetera.Lxc serialization function" $ -- do
     it "serializes multiple mixed options correctly" $
       serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/custom"

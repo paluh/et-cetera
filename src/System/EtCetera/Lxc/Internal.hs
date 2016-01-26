@@ -14,6 +14,7 @@ import qualified Data.HashMap.Strict as HashMap
 import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
 import           Data.Maybe (fromJust, Maybe)
+import           Data.Char (toLower, toUpper)
 import           Language.Haskell.TH (DecsQ, mkName, Name, nameBase)
 import           Prelude hiding ((.))
 import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
@@ -25,6 +26,9 @@ import           Text.Boomerang.String (anyChar, char, lit, parseString, satisfy
 
 data Switch = On | Off
   deriving (Eq, Show)
+
+data NetworkType = None | Empty | Veth | Vlan | Macvlan | Phys
+  deriving (Eq, Read, Show)
 
 -- options list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
@@ -79,7 +83,7 @@ data LxcConfig =
     , lxcNetworkName :: Maybe String
     , lxcNetworkScriptDown :: Maybe String
     , lxcNetworkScriptUp :: Maybe String
-    , lxcNetworkType :: Maybe String
+    , lxcNetworkType :: Maybe NetworkType
     , lxcNetworkVethPair :: Maybe String
     , lxcNetworkVlanId :: Maybe String
     , lxcPivotdir :: Maybe String
@@ -106,6 +110,7 @@ data FieldConfig =
     TextField (Lens' LxcConfig (Maybe String))
   | SwitchField (Lens' LxcConfig (Maybe Switch))
   | ListField (Lens' LxcConfig [String])
+  | NetworkTypeField (Lens' LxcConfig (Maybe NetworkType))
 
 emptyConfig =
   LxcConfig
@@ -227,7 +232,7 @@ fieldsConfig = HashMap.fromList
   , ("lxc.network.name", TextField lxcNetworkNameLens)
   , ("lxc.network.script.down", TextField lxcNetworkScriptDownLens)
   , ("lxc.network.script.up", TextField lxcNetworkScriptUpLens)
-  , ("lxc.network.type", TextField lxcNetworkTypeLens)
+  , ("lxc.network.type", NetworkTypeField lxcNetworkTypeLens)
   , ("lxc.network.veth.pair", TextField lxcNetworkVethPairLens)
   , ("lxc.network.vlan.id", TextField lxcNetworkVlanIdLens)
   , ("lxc.pivotdir", TextField lxcPivotdirLens)
@@ -252,6 +257,7 @@ data Value = VText String
            | VSwitch Switch
            -- used to combine options: environment, include
            | VListOfTextValues [String]
+           | VNetworkType NetworkType
   deriving (Eq, Show)
 
 data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
@@ -273,23 +279,6 @@ word (x:xs) = rCons . char x . word xs
 value :: StringBoomerang r (String :- r)
 value = rCons . noneOf "\n\r \t" . rList1 anyChar
 
-text :: StringBoomerang r (Value :- r)
-text = xpure (arg (:-) VText)
-             (\case
-                (VText t :- r) -> Just (t :- r)
-                otherwise          -> Nothing)
-     . value
-
-switch :: StringBoomerang r (Value :- r)
-switch = xpure (arg (:-) (\case
-                            '0' -> VSwitch Off
-                            '1' -> VSwitch On))
-               (\case
-                  (VSwitch On :- r)  -> Just ('1' :- r)
-                  (VSwitch Off :- r) -> Just ('0' :- r)
-                  otherwise          -> Nothing)
-       . oneOf "01"
-
 optionLine :: StringBoomerang r (ConfigLine :- r)
 optionLine =
   foldl' (<>) mempty
@@ -304,7 +293,39 @@ optionLine =
   fc2prs (TextField _) = text
   fc2prs (SwitchField _) = switch
   fc2prs (ListField _) = text
+  fc2prs (NetworkTypeField _) = networkType
 
+  text :: StringBoomerang r (Value :- r)
+  text = xpure (arg (:-) VText)
+               (\case
+                  (VText t :- r) -> Just (t :- r)
+                  otherwise          -> Nothing)
+       . value
+
+  switch :: StringBoomerang r (Value :- r)
+  switch = xpure (arg (:-) (\case
+                              '0' -> VSwitch Off
+                              '1' -> VSwitch On))
+                 (\case
+                    (VSwitch On :- r)  -> Just ('1' :- r)
+                    (VSwitch Off :- r) -> Just ('0' :- r)
+                    otherwise          -> Nothing)
+         . oneOf "01"
+
+  networkType :: StringBoomerang r (Value :- r)
+  networkType =
+    xpure (arg (:-) VNetworkType)
+          (\case
+            (VNetworkType nt :- r) -> Just (nt :- r)
+            otherwise              -> Nothing)
+    . xpure (arg (:-) (read . capitalize))
+          (Just . arg (:-) (map toLower . show))
+    . (word "none" <> word  "empty" <> word  "veth"
+       <> word  "vlan" <> word  "macvlan" <> word  "phys")
+
+  capitalize :: String -> String
+  capitalize [] = []
+  capitalize (c:cs) = toUpper c:cs
 
 whiteSpace :: StringBoomerang r r
 whiteSpace = lit " " <> lit "\t"
@@ -353,6 +374,10 @@ serialize lxcConf =
     case view l lxcConf of
       Just v  -> OptionLine k (VSwitch v) : result
       Nothing -> result
+  fieldConfig2ConfigLine result (k, NetworkTypeField l) =
+    case view l lxcConf of
+      Just v  -> OptionLine k (VNetworkType v) : result
+      Nothing -> result
   fieldConfig2ConfigLine result (k, ListField l) =
     foldl' (\r v -> OptionLine k (VText v) : r) result (view l lxcConf)
 
@@ -369,15 +394,21 @@ parse conf =
     case confLine of
       -- I can use fromJust as all options are parsed based on fieldsConfig
       (OptionLine k v) -> case fromJust . HashMap.lookup k $ fieldsConfig of
-                            (TextField l) -> if not . null $ view l lxcConf
-                                               then throwError (MultipleOccurencesOfScalarOption k)
-                                               else let (VText v') = v
-                                                    in return $ set l (Just v') lxcConf
-                            (SwitchField l) -> if not . null $ view l lxcConf
-                                                then throwError (MultipleOccurencesOfScalarOption k)
-                                                else let (VSwitch v') = v
-                                                     in return $ set l (Just v') lxcConf
+                            (TextField l)        -> let (VText v') = v
+                                                    in setScalarValue lxcConf k v' l
+                            (SwitchField l)      -> let (VSwitch v') = v
+                                                    in setScalarValue lxcConf k v' l
+                            (NetworkTypeField l) -> let (VNetworkType v') = v
+                                                    in setScalarValue lxcConf k v' l
                             (ListField l) -> let VText v' = v
                                                 in return $ over l (v':) lxcConf
       -- skip comments and empty lines
       otherwise -> eitherLxcConf
+   where
+    setScalarValue :: LxcConfig -> Key -> a ->
+                      Lens' LxcConfig (Maybe a) ->
+                      Either ParsingError LxcConfig
+    setScalarValue lxcConf k v l =
+      if not . null $ view l lxcConf
+        then throwError (MultipleOccurencesOfScalarOption k)
+        else return $ set l (Just v) lxcConf

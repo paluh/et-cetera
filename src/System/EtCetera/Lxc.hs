@@ -1,6 +1,7 @@
 module System.EtCetera.Lxc
   ( emptyConfig
   , LxcConfig(..)
+  , NetworkType(..)
   , parse
   , ParsingError
   , serialize
