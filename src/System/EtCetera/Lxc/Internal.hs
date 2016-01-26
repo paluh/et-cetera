@@ -1,0 +1,383 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
+module System.EtCetera.Lxc.Internal where
+
+import           Control.Arrow (first)
+import           Control.Category ((.), id)
+import           Control.Error (note)
+import           Control.Lens (DefName(..), Lens', lensField, lensRules, makeLensesWith,
+                               over, set, view, (&), (.~), (??))
+import           Control.Monad.Except (MonadError, throwError)
+import qualified Data.HashMap.Strict as HashMap
+import           Data.List (foldl')
+import           Data.Monoid (mempty, (<>))
+import           Data.Maybe (fromJust, Maybe)
+import           Language.Haskell.TH (DecsQ, mkName, Name, nameBase)
+import           Prelude hiding ((.))
+import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
+import           Text.Boomerang.HStack (arg, (:-)(..))
+import           Text.Boomerang.Prim (xpure)
+import           Text.Boomerang.String (anyChar, char, lit, parseString, satisfy, StringBoomerang,
+                                        StringError, unparseString)
+
+
+data Switch = On | Off
+  deriving (Eq, Show)
+
+-- options list taken from here:
+-- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
+data LxcConfig =
+  LxcConfig
+    { lxcAaAllowIncomplete :: Maybe String
+    , lxcAaProfile :: Maybe String
+    , lxcArch :: Maybe String
+    , lxcAutodev :: Maybe Switch
+    , lxcCapDrop :: Maybe String
+    , lxcCapKeep :: Maybe String
+    , lxcCgroup :: Maybe String
+    , lxcConsole :: Maybe String
+    , lxcConsoleLogfile :: Maybe String
+    , lxcDevttydir :: Maybe String
+    , lxcEnvironment :: [String]
+    , lxcEphemeral :: Maybe String
+    , lxcGroup :: Maybe String
+    , lxcHaltsignal :: Maybe String
+    , lxcHook :: Maybe String
+    , lxcHookAutodev :: Maybe String
+    , lxcHookClone :: Maybe String
+    , lxcHookDestroy :: Maybe String
+    , lxcHookMount :: Maybe String
+    , lxcHookPostStop :: Maybe String
+    , lxcHookPreMount :: Maybe String
+    , lxcHookPreStart :: Maybe String
+    , lxcHookStart :: Maybe String
+    , lxcHookStop :: Maybe String
+    , lxcIdMap :: Maybe String
+    , lxcInclude :: [String]
+    , lxcInitCmd :: Maybe String
+    , lxcInitGid :: Maybe String
+    , lxcInitUid :: Maybe String
+    , lxcKmsg :: Maybe Switch
+    , lxcLogfile :: Maybe String
+    , lxcLoglevel :: Maybe String
+    , lxcMonitorUnshare :: Maybe String
+    , lxcMount :: Maybe String
+    , lxcMountAuto :: Maybe String
+    , lxcMountEntry :: Maybe String
+    , lxcNetwork :: Maybe String
+    , lxcNetworkFlags :: Maybe String
+    , lxcNetworkHwaddr :: Maybe String
+    , lxcNetworkIpv4 :: Maybe String
+    , lxcNetworkIpv4Gateway :: Maybe String
+    , lxcNetworkIpv6 :: Maybe String
+    , lxcNetworkIpv6Gateway :: Maybe String
+    , lxcNetworkLink :: Maybe String
+    , lxcNetworkMacvlanMode :: Maybe String
+    , lxcNetworkMtu :: Maybe String
+    , lxcNetworkName :: Maybe String
+    , lxcNetworkScriptDown :: Maybe String
+    , lxcNetworkScriptUp :: Maybe String
+    , lxcNetworkType :: Maybe String
+    , lxcNetworkVethPair :: Maybe String
+    , lxcNetworkVlanId :: Maybe String
+    , lxcPivotdir :: Maybe String
+    , lxcPts :: Maybe String
+    , lxcRebootsignal :: Maybe String
+    , lxcRootfs :: Maybe String
+    , lxcRootfsMount :: Maybe String
+    , lxcRootfsOptions :: Maybe String
+    , lxcSeContext :: Maybe String
+    , lxcSeccomp :: Maybe String
+    , lxcStartAuto :: Maybe String
+    , lxcStartDelay :: Maybe String
+    , lxcStartOrder :: Maybe String
+    , lxcStopsignal :: Maybe String
+    , lxcTty :: Maybe String
+    , lxcUtsname :: Maybe String
+    }
+  deriving (Eq, Show)
+
+makeLensesWith ?? ''LxcConfig $ lensRules
+    & lensField .~ \_ _ name -> [TopName (mkName $ nameBase name ++ "Lens")]
+
+data FieldConfig =
+    TextField (Lens' LxcConfig (Maybe String))
+  | SwitchField (Lens' LxcConfig (Maybe Switch))
+  | ListField (Lens' LxcConfig [String])
+
+emptyConfig =
+  LxcConfig
+    { lxcAaAllowIncomplete  = Nothing
+    , lxcAaProfile  = Nothing
+    , lxcArch  = Nothing
+    , lxcAutodev  = Nothing
+    , lxcCapDrop  = Nothing
+    , lxcCapKeep  = Nothing
+    , lxcCgroup  = Nothing
+    , lxcConsole  = Nothing
+    , lxcConsoleLogfile  = Nothing
+    , lxcDevttydir  = Nothing
+    , lxcEnvironment = []
+    , lxcEphemeral  = Nothing
+    , lxcGroup  = Nothing
+    , lxcHaltsignal  = Nothing
+    , lxcHook  = Nothing
+    , lxcHookAutodev  = Nothing
+    , lxcHookClone  = Nothing
+    , lxcHookDestroy  = Nothing
+    , lxcHookMount  = Nothing
+    , lxcHookPostStop  = Nothing
+    , lxcHookPreMount  = Nothing
+    , lxcHookPreStart  = Nothing
+    , lxcHookStart  = Nothing
+    , lxcHookStop  = Nothing
+    , lxcIdMap  = Nothing
+    , lxcInclude = []
+    , lxcInitCmd  = Nothing
+    , lxcInitGid  = Nothing
+    , lxcInitUid  = Nothing
+    , lxcKmsg  = Nothing
+    , lxcLogfile  = Nothing
+    , lxcLoglevel  = Nothing
+    , lxcMonitorUnshare  = Nothing
+    , lxcMount  = Nothing
+    , lxcMountAuto  = Nothing
+    , lxcMountEntry  = Nothing
+    , lxcNetwork  = Nothing
+    , lxcNetworkFlags  = Nothing
+    , lxcNetworkHwaddr  = Nothing
+    , lxcNetworkIpv4  = Nothing
+    , lxcNetworkIpv4Gateway  = Nothing
+    , lxcNetworkIpv6  = Nothing
+    , lxcNetworkIpv6Gateway  = Nothing
+    , lxcNetworkLink  = Nothing
+    , lxcNetworkMacvlanMode  = Nothing
+    , lxcNetworkMtu  = Nothing
+    , lxcNetworkName  = Nothing
+    , lxcNetworkScriptDown  = Nothing
+    , lxcNetworkScriptUp  = Nothing
+    , lxcNetworkType  = Nothing
+    , lxcNetworkVethPair  = Nothing
+    , lxcNetworkVlanId  = Nothing
+    , lxcPivotdir  = Nothing
+    , lxcPts  = Nothing
+    , lxcRebootsignal  = Nothing
+    , lxcRootfs  = Nothing
+    , lxcRootfsMount  = Nothing
+    , lxcRootfsOptions  = Nothing
+    , lxcSeContext  = Nothing
+    , lxcSeccomp  = Nothing
+    , lxcStartAuto  = Nothing
+    , lxcStartDelay  = Nothing
+    , lxcStartOrder  = Nothing
+    , lxcStopsignal  = Nothing
+    , lxcTty  = Nothing
+    , lxcUtsname  = Nothing
+    }
+
+fieldsConfig = HashMap.fromList
+  [ ("lxc.aa_allow_incomplete", TextField lxcAaAllowIncompleteLens)
+  , ("lxc.aa_profile", TextField lxcAaProfileLens)
+  , ("lxc.arch", TextField lxcArchLens)
+  , ("lxc.autodev", SwitchField lxcAutodevLens)
+  , ("lxc.cap.drop", TextField lxcCapDropLens)
+  , ("lxc.cap.keep", TextField lxcCapKeepLens)
+  , ("lxc.cgroup", TextField lxcCgroupLens)
+  , ("lxc.console", TextField lxcConsoleLens)
+  , ("lxc.console.logfile", TextField lxcConsoleLogfileLens)
+  , ("lxc.devttydir", TextField lxcDevttydirLens)
+  , ("lxc.environment", ListField lxcEnvironmentLens)
+  , ("lxc.ephemeral", TextField lxcEphemeralLens)
+  , ("lxc.group", TextField lxcGroupLens)
+  , ("lxc.haltsignal", TextField lxcHaltsignalLens)
+  , ("lxc.hook", TextField lxcHookLens)
+  , ("lxc.hook.autodev", TextField lxcHookAutodevLens)
+  , ("lxc.hook.clone", TextField lxcHookCloneLens)
+  , ("lxc.hook.destroy", TextField lxcHookDestroyLens)
+  , ("lxc.hook.mount", TextField lxcHookMountLens)
+  , ("lxc.hook.post-stop", TextField lxcHookPostStopLens)
+  , ("lxc.hook.pre-mount", TextField lxcHookPreMountLens)
+  , ("lxc.hook.pre-start", TextField lxcHookPreStartLens)
+  , ("lxc.hook.start", TextField lxcHookStartLens)
+  , ("lxc.hook.stop", TextField lxcHookStopLens)
+  , ("lxc.id_map", TextField lxcIdMapLens)
+  , ("lxc.include", ListField lxcIncludeLens)
+  , ("lxc.init_cmd", TextField lxcInitCmdLens)
+  , ("lxc.init_gid", TextField lxcInitGidLens)
+  , ("lxc.init_uid", TextField lxcInitUidLens)
+  , ("lxc.kmsg", SwitchField lxcKmsgLens)
+  , ("lxc.logfile", TextField lxcLogfileLens)
+  , ("lxc.loglevel", TextField lxcLoglevelLens)
+  , ("lxc.monitor.unshare", TextField lxcMonitorUnshareLens)
+  , ("lxc.mount", TextField lxcMountLens)
+  , ("lxc.mount.auto", TextField lxcMountAutoLens)
+  , ("lxc.mount.entry", TextField lxcMountEntryLens)
+  , ("lxc.network", TextField lxcNetworkLens)
+  , ("lxc.network.flags", TextField lxcNetworkFlagsLens)
+  , ("lxc.network.hwaddr", TextField lxcNetworkHwaddrLens)
+  , ("lxc.network.ipv4", TextField lxcNetworkIpv4Lens)
+  , ("lxc.network.ipv4.gateway", TextField lxcNetworkIpv4GatewayLens)
+  , ("lxc.network.ipv6", TextField lxcNetworkIpv6Lens)
+  , ("lxc.network.ipv6.gateway", TextField lxcNetworkIpv6GatewayLens)
+  , ("lxc.network.link", TextField lxcNetworkLinkLens)
+  , ("lxc.network.macvlan.mode", TextField lxcNetworkMacvlanModeLens)
+  , ("lxc.network.mtu", TextField lxcNetworkMtuLens)
+  , ("lxc.network.name", TextField lxcNetworkNameLens)
+  , ("lxc.network.script.down", TextField lxcNetworkScriptDownLens)
+  , ("lxc.network.script.up", TextField lxcNetworkScriptUpLens)
+  , ("lxc.network.type", TextField lxcNetworkTypeLens)
+  , ("lxc.network.veth.pair", TextField lxcNetworkVethPairLens)
+  , ("lxc.network.vlan.id", TextField lxcNetworkVlanIdLens)
+  , ("lxc.pivotdir", TextField lxcPivotdirLens)
+  , ("lxc.pts", TextField lxcPtsLens)
+  , ("lxc.rebootsignal", TextField lxcRebootsignalLens)
+  , ("lxc.rootfs", TextField lxcRootfsLens)
+  , ("lxc.rootfs.mount", TextField lxcRootfsMountLens)
+  , ("lxc.rootfs.options", TextField lxcRootfsOptionsLens)
+  , ("lxc.se_context", TextField lxcSeContextLens)
+  , ("lxc.seccomp", TextField lxcSeccompLens)
+  , ("lxc.start.auto", TextField lxcStartAutoLens)
+  , ("lxc.start.delay", TextField lxcStartDelayLens)
+  , ("lxc.start.order", TextField lxcStartOrderLens)
+  , ("lxc.stopsignal", TextField lxcStopsignalLens)
+  , ("lxc.tty", TextField lxcTtyLens)
+  , ("lxc.utsname", TextField lxcUtsnameLens)
+  ]
+
+type Key = String
+data Value = VText String
+           | VInt Int
+           | VSwitch Switch
+           -- used to combine options: environment, include
+           | VListOfTextValues [String]
+  deriving (Eq, Show)
+
+data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
+  deriving (Eq, Show)
+
+noneOf :: String -> StringBoomerang r (Char :- r)
+noneOf l = satisfy (not . (`elem` l))
+
+oneOf :: String -> StringBoomerang r (Char :- r)
+oneOf l = satisfy (`elem` l)
+
+eol :: StringBoomerang r r
+eol = lit "\n" <> lit "\r\n"
+
+word :: String -> StringBoomerang r (String :- r)
+word []     = rNil
+word (x:xs) = rCons . char x . word xs
+
+value :: StringBoomerang r (String :- r)
+value = rCons . noneOf "\n\r \t" . rList1 anyChar
+
+text :: StringBoomerang r (Value :- r)
+text = xpure (arg (:-) VText)
+             (\case
+                (VText t :- r) -> Just (t :- r)
+                otherwise          -> Nothing)
+     . value
+
+switch :: StringBoomerang r (Value :- r)
+switch = xpure (arg (:-) (\case
+                            '0' -> VSwitch Off
+                            '1' -> VSwitch On))
+               (\case
+                  (VSwitch On :- r)  -> Just ('1' :- r)
+                  (VSwitch Off :- r) -> Just ('0' :- r)
+                  otherwise          -> Nothing)
+       . oneOf "01"
+
+optionLine :: StringBoomerang r (ConfigLine :- r)
+optionLine =
+  foldl' (<>) mempty
+    (map (\(l, vp) -> option . word l . manyl whiteSpace
+                   .  lit "=" . manyl whiteSpace . vp)
+      [(n, fc2prs fc) | (n, fc) <- HashMap.toList fieldsConfig])
+ where
+  option = xpure (arg (arg (:-)) OptionLine)
+                 (\case
+                    (OptionLine k v :- r) -> Just (k :- v :- r)
+                    otherwise -> Nothing)
+  fc2prs (TextField _) = text
+  fc2prs (SwitchField _) = switch
+  fc2prs (ListField _) = text
+
+
+whiteSpace :: StringBoomerang r r
+whiteSpace = lit " " <> lit "\t"
+
+nonEmptyConfigLine :: StringBoomerang r (ConfigLine :- r)
+nonEmptyConfigLine =
+     comment
+  <> optionLine
+ where
+  comment = xpure (arg (:-) CommentLine)
+                  (\case
+                    (CommentLine c :- r) -> Just (c :- r)
+                    otherwise -> Nothing)
+          . manyl whiteSpace . lit "#" . rList (noneOf "\n")
+
+emptyLine = xpure (\r -> EmptyLine :- r)
+                  (\case
+                    (EmptyLine :- r) -> Just r
+                    otherwise        -> Nothing)
+          . manyl whiteSpace
+
+configLines :: StringBoomerang r ([ConfigLine] :- r)
+configLines =
+  -- to simplify last new line parsing I've split empty line case
+     (rCons . nonEmptyConfigLine . (eol . configLines <> push []))
+  <> (rCons . emptyLine . eol . configLines <> manyl whiteSpace . push [])
+
+data ParsingError = MultipleOccurencesOfScalarOption String
+                  | ParserError StringError
+  deriving (Eq, Show)
+
+data SerializtionError = SerializtionError
+  deriving (Eq, Show)
+
+serialize :: LxcConfig -> Either SerializtionError String
+serialize lxcConf =
+  note SerializtionError
+    . unparseString configLines
+    . foldl' fieldConfig2ConfigLine [] $ HashMap.toList fieldsConfig
+ where
+  fieldConfig2ConfigLine result (k, TextField l) =
+    case view l lxcConf of
+      Just v  -> OptionLine k (VText v) : result
+      Nothing -> result
+  fieldConfig2ConfigLine result (k, SwitchField l) =
+    case view l lxcConf of
+      Just v  -> OptionLine k (VSwitch v) : result
+      Nothing -> result
+  fieldConfig2ConfigLine result (k, ListField l) =
+    foldl' (\r v -> OptionLine k (VText v) : r) result (view l lxcConf)
+
+parse :: String -> Either ParsingError LxcConfig
+parse conf =
+  either (Left . ParserError) lxcConfig confLns
+ where
+  confLns = parseString configLines conf
+  lxcConfig = foldl' setValue (Right emptyConfig)
+
+  setValue :: Either ParsingError LxcConfig -> ConfigLine -> Either ParsingError LxcConfig
+  setValue eitherLxcConf confLine = do
+    lxcConf <- eitherLxcConf
+    case confLine of
+      -- I can use fromJust as all options are parsed based on fieldsConfig
+      (OptionLine k v) -> case fromJust . HashMap.lookup k $ fieldsConfig of
+                            (TextField l) -> if not . null $ view l lxcConf
+                                               then throwError (MultipleOccurencesOfScalarOption k)
+                                               else let (VText v') = v
+                                                    in return $ set l (Just v') lxcConf
+                            (SwitchField l) -> if not . null $ view l lxcConf
+                                                then throwError (MultipleOccurencesOfScalarOption k)
+                                                else let (VSwitch v') = v
+                                                     in return $ set l (Just v') lxcConf
+                            (ListField l) -> let VText v' = v
+                                                in return $ over l (v':) lxcConf
+      -- skip comments and empty lines
+      otherwise -> eitherLxcConf

@@ -3,9 +3,11 @@
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.LxcSpec where
 
-import qualified Data.HashMap.Strict as HashMap
-import           System.EtCetera.Lxc (configLines, ConfigLine(..),
-                                      parseConfig, Switch(..), Value(..))
+import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..),
+                                               emptyConfig, LxcConfig, parse,
+                                               serialize, SerializtionError(..),
+                                               Switch(..), Value(..), lxcInclude,
+                                               lxcRootfs)
 import           Text.Boomerang.String (parseString, unparseString)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -69,15 +71,24 @@ suite = do
                         ])
   describe "System.EtCetera.Lxc parsing function" $ -- do
     it "parses multiple mixed lines correctly" $
-      parseConfig (unlines [ "#comment "
-                           , "lxc.include = /var/lib/lxc/lxc-common.conf"
-                           , "lxc.include = /var/lib/lxc/custom"
-                           , "lxc.rootfs = /mnt/rootfs.complex"
-                           , "# another comment "
-                           , "\t"
-                           ]) `shouldBe`
-        (Right . HashMap.fromList $
-          [ ("lxc.include", VListOfTextValues [ "/var/lib/lxc/custom"
-                                              , "/var/lib/lxc/lxc-common.conf"])
-          , ("lxc.rootfs", VText "/mnt/rootfs.complex")
-          ])
+      parse (unlines [ "#comment "
+                     , "lxc.include = /var/lib/lxc/lxc-common.conf"
+                     , "lxc.include = /var/lib/lxc/custom"
+                     , "lxc.rootfs = /mnt/rootfs.complex"
+                     , "# another comment "
+                     , "\t"
+                     ]) `shouldBe`
+        (Right $ emptyConfig { lxcInclude = [ "/var/lib/lxc/custom"
+                                            , "/var/lib/lxc/lxc-common.conf"]
+                             , lxcRootfs =  Just "/mnt/rootfs.complex"
+                             })
+  describe "System.EtCetera.Lxc serialization function" $ -- do
+    it "serializes multiple mixed options correctly" $
+      serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/custom"
+                                            , "/var/lib/lxc/lxc-common.conf"]
+                             , lxcRootfs =  Just "/mnt/rootfs.complex"
+                             }) `shouldBe`
+        (Right . unlines $ [ "lxc.rootfs=/mnt/rootfs.complex"
+                           , "lxc.include=/var/lib/lxc/lxc-common.conf"
+                           , "lxc.include=/var/lib/lxc/custom"
+                           ])
