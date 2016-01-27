@@ -22,7 +22,7 @@ import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rLi
 import           Text.Boomerang.Error (ErrorMsg(..), mkParserError)
 import           Text.Boomerang.HStack (arg, hdMap, (:-)(..))
 import           Text.Boomerang.Pos (incMajor, incMinor)
-import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, xpure)
+import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, unparse, xpure)
 import           Text.Boomerang.String (anyChar, char, digit, lit, parseString, satisfy,
                                         StringBoomerang, StringError, unparseString)
 
@@ -219,18 +219,16 @@ vector l p =
 addOpt :: StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
           StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
           StringBoomerang (LxcConfig :- r) (LxcConfig :- r)
-addOpt o p =
+addOpt p o =
   Boomerang pf sf
  where
   pf = prs (o <> p)
-  sf = ser (((o . lit "\n") <> lit "dupa") . p)
+  sf = ser ((p . lit "\n" . o) <> p)
 
 anyOption =
            scalar lxcAaProfileLens (lit "lxc.aa_profile" . lit "=" . value)
   `addOpt` scalar lxcArchLens (lit "lxc.arch" . lit "=" . value)
   `addOpt` vector lxcIncludeLens (lit "lxc.include" . lit "=" . value)
-  `addOpt` scalar lxcArchLens (lit "lxc.arch" . lit "=" . value)
-  `addOpt` scalar lxcAaProfileLens (lit "lxc.aa_profile" . lit "=" . value)
 
 new =
   Boomerang pf sf

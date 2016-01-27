@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.LxcSpec where
 
+import           Control.Monad.Trans (liftIO)
 import           Data.List (intercalate)
 import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..), emptyConfig, LxcConfig,
                                                NetworkType(..), newParse, newSerialize, parse,
