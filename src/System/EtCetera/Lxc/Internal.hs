@@ -109,13 +109,6 @@ data LxcConfig =
 makeLensesWith ?? ''LxcConfig $ lensRules
     & lensField .~ \_ _ name -> [TopName (mkName $ nameBase name ++ "Lens")]
 
-data FieldConfig =
-    TextField (Lens' LxcConfig (Maybe String))
-  | SwitchField (Lens' LxcConfig (Maybe Switch))
-  | ListField (Lens' LxcConfig [String])
-  | IntField (Lens' LxcConfig (Maybe Int))
-  | NetworkTypeField (Lens' LxcConfig (Maybe NetworkType))
-
 emptyConfig =
   LxcConfig
     { lxcAaAllowIncomplete  = Nothing
