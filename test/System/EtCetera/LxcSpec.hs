@@ -3,10 +3,12 @@
 {-# LANGUAGE TypeOperators #-}
 module System.EtCetera.LxcSpec where
 
+import           Data.List (intercalate)
 import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..), emptyConfig, LxcConfig,
-                                               NetworkType(..), parse, serialize,
-                                               SerializtionError(..), Switch(..), Value(..),
-                                               lxcInclude, lxcNetworkType, lxcRootfs, lxcStartDelay)
+                                               NetworkType(..), newParse, newSerialize, parse,
+                                               serialize, SerializtionError(..), Switch(..), Value(..),
+                                               lxcAaProfile, lxcInclude, lxcNetworkType,
+                                               lxcRootfs, lxcStartDelay)
 import           Text.Boomerang.String (parseString, unparseString)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -94,6 +96,42 @@ suite = do
                              , lxcRootfs =  Just "/mnt/rootfs.complex"
                              }) `shouldBe`
         (Right . unlines $ [ "lxc.rootfs=/mnt/rootfs.complex"
+                           , "lxc.include=/var/lib/lxc/lxc-common.conf"
+                           , "lxc.include=/var/lib/lxc/custom"
+                           ])
+
+  describe "System.EtCetera.Lxc new parsing/serialization functions" $ do
+    it "parses single option line with new line char at the end" $
+      newParse "lxc.aa_profile=/mnt/rootfs.complex" `shouldBe`
+        Right (emptyConfig {lxcAaProfile = Just "/mnt/rootfs.complex"})
+    it "parses multiple options line with new line char at the end" $
+      newParse (unlines [ "lxc.include=/var/lib/lxc/lxc-common.conf"
+                        , "lxc.aa_profile=/mnt/rootfs.complex"
+                        , "lxc.include=/var/lib/lxc/custom"
+                        ]) `shouldBe`
+        Right (emptyConfig { lxcAaProfile = Just "/mnt/rootfs.complex"
+                           , lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
+                                          , "/var/lib/lxc/custom"
+                                          ]})
+    it "parses signle comment" $
+      newParse "# comment" `shouldBe`
+        Right emptyConfig
+    it "parses multiple options line with new line char at the end" $
+      newParse (unlines [ "lxc.include=/var/lib/lxc/lxc-common.conf"
+                        , "# comment"
+                        , "lxc.aa_profile=/mnt/rootfs.complex"
+                        , "lxc.include=/var/lib/lxc/custom"
+                        ]) `shouldBe`
+        Right (emptyConfig { lxcAaProfile = Just "/mnt/rootfs.complex"
+                           , lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
+                                          , "/var/lib/lxc/custom"
+                                          ]})
+    it "serializes single option" $
+      newSerialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
+                                               , "/var/lib/lxc/custom"]
+                                , lxcAaProfile = Just "/mnt/rootfs.complex"
+                                }) `shouldBe`
+        (Right . unlines $ [ "lxc.aa_profile=/mnt/rootfs.complex"
                            , "lxc.include=/var/lib/lxc/lxc-common.conf"
                            , "lxc.include=/var/lib/lxc/custom"
                            ])

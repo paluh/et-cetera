@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
@@ -13,15 +14,17 @@ import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
-import           Data.Maybe (fromJust, Maybe)
+import           Data.Maybe (fromJust, fromMaybe, Maybe)
 import           Data.Char (toLower, toUpper)
 import           Language.Haskell.TH (DecsQ, mkName, Name, nameBase)
-import           Prelude hiding ((.))
+import           Prelude hiding ((.), id)
 import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
-import           Text.Boomerang.HStack (arg, (:-)(..))
-import           Text.Boomerang.Prim (xpure)
-import           Text.Boomerang.String (anyChar, char, digit, lit, parseString, satisfy, StringBoomerang,
-                                        StringError, unparseString)
+import           Text.Boomerang.Error (ErrorMsg(..), mkParserError)
+import           Text.Boomerang.HStack (arg, hdMap, (:-)(..))
+import           Text.Boomerang.Pos (incMajor, incMinor)
+import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, xpure)
+import           Text.Boomerang.String (anyChar, char, digit, lit, parseString, satisfy,
+                                        StringBoomerang, StringError, unparseString)
 
 
 data Switch = On | Off
@@ -183,6 +186,101 @@ emptyConfig =
     , lxcUtsname  = Nothing
     }
 
+scalar :: Lens' LxcConfig (Maybe a) ->
+          StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
+          StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+scalar l p =
+  xpure (\(v :- lxc :- r) -> set l v lxc :- r)
+        (\(lxc :- r) -> Just (view l lxc :- lxc :- r))
+  . xpure (hdMap Just)
+          (\case
+            Just v :- r -> Just (v :- r)
+            Nothing :- r -> Nothing)
+  . p
+
+vector :: Lens' LxcConfig [a] ->
+          StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
+          StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+vector l p =
+  Boomerang pf sf
+ where
+  process =
+    xpure (\(v :- lxc :- r) -> over l (v ++ ) lxc :- r)
+          (\(lxc :- r) -> let v = view l lxc
+                          in if null v
+                              then Nothing
+                              else Just (v :- lxc :-r))
+  -- parse one at a time
+  pf = prs (process . rList p)
+  -- print all at ones
+  sf = ser (process . rList (p . eol))
+
+-- not exactly an isomorphisms ;-)
+addOpt :: StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
+          StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
+          StringBoomerang (LxcConfig :- r) (LxcConfig :- r)
+addOpt o p =
+  Boomerang pf sf
+ where
+  pf = prs (o <> p)
+  sf = ser (((o . lit "\n") <> lit "dupa") . p)
+
+anyOption =
+           scalar lxcAaProfileLens (lit "lxc.aa_profile" . lit "=" . value)
+  `addOpt` scalar lxcArchLens (lit "lxc.arch" . lit "=" . value)
+  `addOpt` vector lxcIncludeLens (lit "lxc.include" . lit "=" . value)
+  `addOpt` scalar lxcArchLens (lit "lxc.arch" . lit "=" . value)
+  `addOpt` scalar lxcAaProfileLens (lit "lxc.aa_profile" . lit "=" . value)
+
+new =
+  Boomerang pf sf
+ where
+  parserBoomerang = (lit "#" . manyl (ignoreWhen (not . (== '\n')))
+                     <> manyl whiteSpace
+                     <> anyOption)
+                  . opt ((eol . parserBoomerang) <> eol)
+  pf = prs parserBoomerang
+  sf = ser anyOption
+
+newParse :: String -> Either ParsingError LxcConfig
+newParse conf =
+  either (Left . ParserError) Right (parseString (new . push emptyConfig) conf)
+
+newSerialize :: LxcConfig -> Either SerializtionError String
+newSerialize lxc =
+  note SerializtionError . unparseString (new . push lxc) $ lxc
+
+-- not exactly an isomorphism :-)
+ignoreWhen :: (Char -> Bool) -> StringBoomerang r r
+ignoreWhen p = Boomerang
+  (Parser $ \tok pos ->
+       case tok of
+         []        -> mkParserError pos [EOI "input"]
+         (c:cs)
+             | p c ->
+                 [Right ((id, cs),
+                          if c == '\n'
+                            then incMajor 1 pos
+                            else incMinor 1 pos)]
+             | otherwise ->
+                 mkParserError pos [SysUnExpect $ show c]
+  )
+  (\r -> [(id, r)])
+
+-- fc = FC
+--   lxcAaProfileLens
+--   ((hdMap Just (lit "lxc.aa_profile" . lit "=" . value)) <> push Nothing)
+--  FC lxcArchLens (hdMap Just (lit "lxc.arch" . lit "=" . value) <> push Nothing) :- ()
+
+-- boomerang for parse: Boomerang () a
+-- fc2parser :: FC a -> StringBoomerang () LxcConfig -> StringBoomerang () LxcConfig
+-- fc2parser (FC l p) b =
+--   xpure (\(v :- lxc) -> set l v lxc)
+--         (\lxc -> Just (view l lxc :- lxc))
+--   . p . b
+-- fc2parser (FC l p :- t) r =
+--   (xpure (arg (:-) (set l)) undefined . p) <> fc2parser t r
+
 fieldsConfig = HashMap.fromList
   [ ("lxc.aa_allow_incomplete", TextField lxcAaAllowIncompleteLens)
   , ("lxc.aa_profile", TextField lxcAaProfileLens)
@@ -271,14 +369,14 @@ oneOf :: String -> StringBoomerang r (Char :- r)
 oneOf l = satisfy (`elem` l)
 
 eol :: StringBoomerang r r
-eol = lit "\n" <> lit "\r\n"
+eol = lit "\n"
 
 word :: String -> StringBoomerang r (String :- r)
 word []     = rNil
 word (x:xs) = rCons . char x . word xs
 
 value :: StringBoomerang r (String :- r)
-value = rCons . noneOf "\n\r \t" . rList1 anyChar
+value = rList1 (noneOf "\n \t")
 
 optionLine :: StringBoomerang r (ConfigLine :- r)
 optionLine =
