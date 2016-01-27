@@ -66,7 +66,7 @@ suite = do
                              , lxcRootfs =  Just "/mnt/rootfs.complex"
                              })
   describe "System.EtCetera.Lxc serialize" $ -- do
-    it "serializes single option" $
+    it "serializes multiple options" $
       serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
                                             , "/var/lib/lxc/custom"]
                              , lxcAaProfile = Just "/mnt/rootfs.complex"
