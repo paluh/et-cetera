@@ -6,7 +6,7 @@ module System.EtCetera.LxcSpec where
 import           System.EtCetera.Lxc.Internal (configLines, ConfigLine(..), emptyConfig, LxcConfig,
                                                NetworkType(..), parse, serialize,
                                                SerializtionError(..), Switch(..), Value(..),
-                                               lxcInclude, lxcNetworkType, lxcRootfs)
+                                               lxcInclude, lxcNetworkType, lxcRootfs, lxcStartDelay)
 import           Text.Boomerang.String (parseString, unparseString)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -84,6 +84,9 @@ suite = do
     it "parses network type correctly" $
       parse "lxc.network.type = macvlan" `shouldBe`
         (Right $ emptyConfig { lxcNetworkType = Just Macvlan})
+    it "parses integer value correctly" $
+      parse "lxc.start.delay = 8" `shouldBe`
+        (Right $ emptyConfig { lxcStartDelay = Just 8})
   describe "System.EtCetera.Lxc serialization function" $ -- do
     it "serializes multiple mixed options correctly" $
       serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/custom"

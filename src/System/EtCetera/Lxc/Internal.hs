@@ -20,7 +20,7 @@ import           Prelude hiding ((.))
 import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
 import           Text.Boomerang.HStack (arg, (:-)(..))
 import           Text.Boomerang.Prim (xpure)
-import           Text.Boomerang.String (anyChar, char, lit, parseString, satisfy, StringBoomerang,
+import           Text.Boomerang.String (anyChar, char, digit, lit, parseString, satisfy, StringBoomerang,
                                         StringError, unparseString)
 
 
@@ -94,9 +94,9 @@ data LxcConfig =
     , lxcRootfsOptions :: Maybe String
     , lxcSeContext :: Maybe String
     , lxcSeccomp :: Maybe String
-    , lxcStartAuto :: Maybe String
-    , lxcStartDelay :: Maybe String
-    , lxcStartOrder :: Maybe String
+    , lxcStartAuto :: Maybe Switch
+    , lxcStartDelay :: Maybe Int
+    , lxcStartOrder :: Maybe Int
     , lxcStopsignal :: Maybe String
     , lxcTty :: Maybe String
     , lxcUtsname :: Maybe String
@@ -110,6 +110,7 @@ data FieldConfig =
     TextField (Lens' LxcConfig (Maybe String))
   | SwitchField (Lens' LxcConfig (Maybe Switch))
   | ListField (Lens' LxcConfig [String])
+  | IntField (Lens' LxcConfig (Maybe Int))
   | NetworkTypeField (Lens' LxcConfig (Maybe NetworkType))
 
 emptyConfig =
@@ -243,9 +244,9 @@ fieldsConfig = HashMap.fromList
   , ("lxc.rootfs.options", TextField lxcRootfsOptionsLens)
   , ("lxc.se_context", TextField lxcSeContextLens)
   , ("lxc.seccomp", TextField lxcSeccompLens)
-  , ("lxc.start.auto", TextField lxcStartAutoLens)
-  , ("lxc.start.delay", TextField lxcStartDelayLens)
-  , ("lxc.start.order", TextField lxcStartOrderLens)
+  , ("lxc.start.auto", SwitchField lxcStartAutoLens)
+  , ("lxc.start.delay", IntField lxcStartDelayLens)
+  , ("lxc.start.order", IntField lxcStartOrderLens)
   , ("lxc.stopsignal", TextField lxcStopsignalLens)
   , ("lxc.tty", TextField lxcTtyLens)
   , ("lxc.utsname", TextField lxcUtsnameLens)
@@ -293,6 +294,7 @@ optionLine =
   fc2prs (TextField _) = text
   fc2prs (SwitchField _) = switch
   fc2prs (ListField _) = text
+  fc2prs (IntField _) = int
   fc2prs (NetworkTypeField _) = networkType
 
   text :: StringBoomerang r (Value :- r)
@@ -311,6 +313,16 @@ optionLine =
                     (VSwitch Off :- r) -> Just ('0' :- r)
                     otherwise          -> Nothing)
          . oneOf "01"
+
+  int :: StringBoomerang r (Value :- r)
+  int =
+    xpure (arg (:-) VInt)
+          (\case
+            (VInt i :- r) -> Just (i :- r)
+            otherwise     -> Nothing)
+    . xpure (arg (:-) read)
+            (Just . arg (:-) show)
+    . rList1 digit
 
   networkType :: StringBoomerang r (Value :- r)
   networkType =
@@ -374,6 +386,10 @@ serialize lxcConf =
     case view l lxcConf of
       Just v  -> OptionLine k (VSwitch v) : result
       Nothing -> result
+  fieldConfig2ConfigLine result (k, IntField l) =
+    case view l lxcConf of
+      Just v  -> OptionLine k (VInt v) : result
+      Nothing -> result
   fieldConfig2ConfigLine result (k, NetworkTypeField l) =
     case view l lxcConf of
       Just v  -> OptionLine k (VNetworkType v) : result
@@ -392,11 +408,13 @@ parse conf =
   setValue eitherLxcConf confLine = do
     lxcConf <- eitherLxcConf
     case confLine of
-      -- I can use fromJust as all options are parsed based on fieldsConfig
       (OptionLine k v) -> case fromJust . HashMap.lookup k $ fieldsConfig of
                             (TextField l)        -> let (VText v') = v
                                                     in setScalarValue lxcConf k v' l
+                                  -- use fromJust as all options are parsed based on fieldsConfig
                             (SwitchField l)      -> let (VSwitch v') = v
+                                                    in setScalarValue lxcConf k v' l
+                            (IntField l)         -> let (VInt v') = v
                                                     in setScalarValue lxcConf k v' l
                             (NetworkTypeField l) -> let (VNetworkType v') = v
                                                     in setScalarValue lxcConf k v' l
