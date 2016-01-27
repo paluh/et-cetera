@@ -192,7 +192,7 @@ lxcConfig =
   -- XXX: nearly all of below boomerangs
   --      are not "isomorpisms" at all.
   --      It is just easier to build
-  --      serializer and parser using boomerang
+  --      serializer and parser using boomerang's
   --      combinators.
   parserBoomerang = (lit "#" . manyl (ignoreWhen (not . (== '\n')))
                      <> manyl whiteSpace
@@ -269,43 +269,19 @@ lxcConfig =
     `addOpt` scalar lxcTtyLens (option "lxc.tty" text)
     `addOpt` scalar lxcUtsnameLens (option "lxc.utsname" text)
 
-  -- construct option line boomerang
-  option l vp = lit l . manyl whiteSpace .  lit "=" . manyl whiteSpace . vp
-
-  text :: StringBoomerang r (String :- r)
-  text = rList1 (noneOf "\n \t")
-
-  switch = xpure (arg (:-) (\case
-                              '0' -> Off
-                              '1' -> On))
-                 (\case
-                    (On :- r)  -> Just ('1' :- r)
-                    (Off :- r) -> Just ('0' :- r))
-         . oneOf "01"
-  int =
-      xpure (arg (:-) read)
-            (Just . arg (:-) show)
-    . rList1 digit
-
-  networkType =
-      xpure (arg (:-) (read . capitalize))
-          (Just . arg (:-) (map toLower . show))
-      . (word "none" <> word  "empty" <> word  "veth"
-         <> word  "vlan" <> word  "macvlan" <> word  "phys")
-
-  capitalize :: String -> String
-  capitalize [] = []
-  capitalize (c:cs) = toUpper c:cs
-
   addOpt :: StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
             StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
             StringBoomerang (LxcConfig :- r) (LxcConfig :- r)
   addOpt p o =
-    Boomerang pf sf
+    Boomerang (prs (o <> p)) sf
    where
-    pf = prs (o <> p)
-    sf = ser ((p . lit "\n" . o) <> p)
-
+    psf = ser p
+    osf = ser o
+    sf s = case osf s of
+            [] -> psf s
+            fr@((f, s'):_) -> case psf s' of
+                                [] -> fr
+                                l -> [(g . ('\n':) . f, s'') | (g, s'') <- l]
 
   scalar :: Lens' LxcConfig (Maybe a) ->
             StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
@@ -335,6 +311,35 @@ lxcConfig =
                             in if null v
                                 then Nothing
                                 else Just (v :- lxc :-r))
+
+  -- construct option line boomerang
+  option l vp = lit l . manyl whiteSpace .  lit "=" . manyl whiteSpace . vp
+
+  text :: StringBoomerang r (String :- r)
+  text = rList1 (noneOf "\n \t")
+
+  switch = xpure (arg (:-) (\case
+                              '0' -> Off
+                              '1' -> On))
+                 (\case
+                    (On :- r)  -> Just ('1' :- r)
+                    (Off :- r) -> Just ('0' :- r))
+         . oneOf "01"
+  int =
+      xpure (arg (:-) read)
+            (Just . arg (:-) show)
+    . rList1 digit
+
+  networkType =
+      xpure (arg (:-) (read . capitalize))
+          (Just . arg (:-) (map toLower . show))
+      . (word "none" <> word  "empty" <> word  "veth"
+         <> word  "vlan" <> word  "macvlan" <> word  "phys")
+
+  capitalize :: String -> String
+  capitalize [] = []
+  capitalize (c:cs) = toUpper c:cs
+
 
 ignoreWhen :: (Char -> Bool) -> StringBoomerang r r
 ignoreWhen p = Boomerang

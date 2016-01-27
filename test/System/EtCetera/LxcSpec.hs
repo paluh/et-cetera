@@ -53,7 +53,7 @@ suite = do
                            , lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
                                           , "/var/lib/lxc/custom"
                                           ]})
-    it "parses multiple mixed lines without new line at the end" $
+    it "parses mixed multiple lines without new line at the end" $
       parse (intercalate "\n" [ "#comment "
                               , "lxc.include = /var/lib/lxc/lxc-common.conf"
                               , "lxc.include = /var/lib/lxc/custom"
@@ -61,8 +61,8 @@ suite = do
                               , "# another comment "
                               , "\t"
                               ]) `shouldBe`
-        (Right $ emptyConfig { lxcInclude = [ "/var/lib/lxc/custom"
-                                            , "/var/lib/lxc/lxc-common.conf"]
+        (Right $ emptyConfig { lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
+                                            , "/var/lib/lxc/custom"]
                              , lxcRootfs =  Just "/mnt/rootfs.complex"
                              })
   describe "System.EtCetera.Lxc serialize" $ -- do
