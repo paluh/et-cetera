@@ -186,53 +186,14 @@ emptyConfig =
     , lxcUtsname  = Nothing
     }
 
-scalar :: Lens' LxcConfig (Maybe a) ->
-          StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
-          StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
-scalar l p =
-  xpure (\(v :- lxc :- r) -> set l v lxc :- r)
-        (\(lxc :- r) -> Just (view l lxc :- lxc :- r))
-  . xpure (hdMap Just)
-          (\case
-            Just v :- r -> Just (v :- r)
-            Nothing :- r -> Nothing)
-  . p
-
-vector :: Lens' LxcConfig [a] ->
-          StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
-          StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
-vector l p =
+lxcConfig =
   Boomerang pf sf
  where
-  process =
-    xpure (\(v :- lxc :- r) -> over l (v ++ ) lxc :- r)
-          (\(lxc :- r) -> let v = view l lxc
-                          in if null v
-                              then Nothing
-                              else Just (v :- lxc :-r))
-  -- parse one at a time
-  pf = prs (process . rList p)
-  -- print all at ones
-  sf = ser (process . rList (p . eol))
-
--- not exactly an isomorphisms ;-)
-addOpt :: StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
-          StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
-          StringBoomerang (LxcConfig :- r) (LxcConfig :- r)
-addOpt p o =
-  Boomerang pf sf
- where
-  pf = prs (o <> p)
-  sf = ser ((p . lit "\n" . o) <> p)
-
-anyOption =
-           scalar lxcAaProfileLens (lit "lxc.aa_profile" . lit "=" . value)
-  `addOpt` scalar lxcArchLens (lit "lxc.arch" . lit "=" . value)
-  `addOpt` vector lxcIncludeLens (lit "lxc.include" . lit "=" . value)
-
-new =
-  Boomerang pf sf
- where
+  -- XXX: nearly all of below boomerangs
+  --      are not "isomorpisms" at all.
+  --      It is just easier to build
+  --      serializer and parser using boomerang
+  --      combinators.
   parserBoomerang = (lit "#" . manyl (ignoreWhen (not . (== '\n')))
                      <> manyl whiteSpace
                      <> anyOption)
@@ -240,15 +201,141 @@ new =
   pf = prs parserBoomerang
   sf = ser anyOption
 
-newParse :: String -> Either ParsingError LxcConfig
-newParse conf =
-  either (Left . ParserError) Right (parseString (new . push emptyConfig) conf)
+  anyOption =
+             scalar lxcAaAllowIncompleteLens (option "lxc.aa_allow_incomplete" text)
+    `addOpt` scalar lxcAaProfileLens (option "lxc.aa_profile" text)
+    `addOpt` scalar lxcArchLens (option "lxc.arch" text)
+    `addOpt` scalar lxcAutodevLens (option "lxc.autodev" switch)
+    `addOpt` scalar lxcCapDropLens (option "lxc.cap.drop" text)
+    `addOpt` scalar lxcCapKeepLens (option "lxc.cap.keep" text)
+    `addOpt` scalar lxcCgroupLens (option "lxc.cgroup" text)
+    `addOpt` scalar lxcConsoleLens (option "lxc.console" text)
+    `addOpt` scalar lxcConsoleLogfileLens (option "lxc.console.logfile" text)
+    `addOpt` scalar lxcDevttydirLens (option "lxc.devttydir" text)
+    `addOpt` vector lxcEnvironmentLens (option "lxc.environment" text)
+    `addOpt` scalar lxcEphemeralLens (option "lxc.ephemeral" text)
+    `addOpt` scalar lxcGroupLens (option "lxc.group" text)
+    `addOpt` scalar lxcHaltsignalLens (option "lxc.haltsignal" text)
+    `addOpt` scalar lxcHookLens (option "lxc.hook" text)
+    `addOpt` scalar lxcHookAutodevLens (option "lxc.hook.autodev" text)
+    `addOpt` scalar lxcHookCloneLens (option "lxc.hook.clone" text)
+    `addOpt` scalar lxcHookDestroyLens (option "lxc.hook.destroy" text)
+    `addOpt` scalar lxcHookMountLens (option "lxc.hook.mount" text)
+    `addOpt` scalar lxcHookPostStopLens (option "lxc.hook.post-stop" text)
+    `addOpt` scalar lxcHookPreMountLens (option "lxc.hook.pre-mount" text)
+    `addOpt` scalar lxcHookPreStartLens (option "lxc.hook.pre-start" text)
+    `addOpt` scalar lxcHookStartLens (option "lxc.hook.start" text)
+    `addOpt` scalar lxcHookStopLens (option "lxc.hook.stop" text)
+    `addOpt` scalar lxcIdMapLens (option "lxc.id_map" text)
+    `addOpt` vector lxcIncludeLens (option "lxc.include" text)
+    `addOpt` scalar lxcInitCmdLens (option "lxc.init_cmd" text)
+    `addOpt` scalar lxcInitGidLens (option "lxc.init_gid" text)
+    `addOpt` scalar lxcInitUidLens (option "lxc.init_uid" text)
+    `addOpt` scalar lxcKmsgLens (option "lxc.kmsg" switch)
+    `addOpt` scalar lxcLogfileLens (option "lxc.logfile" text)
+    `addOpt` scalar lxcLoglevelLens (option "lxc.loglevel" text)
+    `addOpt` scalar lxcMonitorUnshareLens (option "lxc.monitor.unshare" text)
+    `addOpt` scalar lxcMountLens (option "lxc.mount" text)
+    `addOpt` scalar lxcMountAutoLens (option "lxc.mount.auto" text)
+    `addOpt` scalar lxcMountEntryLens (option "lxc.mount.entry" text)
+    `addOpt` scalar lxcNetworkLens (option "lxc.network" text)
+    `addOpt` scalar lxcNetworkFlagsLens (option "lxc.network.flags" text)
+    `addOpt` scalar lxcNetworkHwaddrLens (option "lxc.network.hwaddr" text)
+    `addOpt` scalar lxcNetworkIpv4Lens (option "lxc.network.ipv4" text)
+    `addOpt` scalar lxcNetworkIpv4GatewayLens (option "lxc.network.ipv4.gateway" text)
+    `addOpt` scalar lxcNetworkIpv6Lens (option "lxc.network.ipv6" text)
+    `addOpt` scalar lxcNetworkIpv6GatewayLens (option "lxc.network.ipv6.gateway" text)
+    `addOpt` scalar lxcNetworkLinkLens (option "lxc.network.link" text)
+    `addOpt` scalar lxcNetworkMacvlanModeLens (option "lxc.network.macvlan.mode" text)
+    `addOpt` scalar lxcNetworkMtuLens (option "lxc.network.mtu" text)
+    `addOpt` scalar lxcNetworkNameLens (option "lxc.network.name" text)
+    `addOpt` scalar lxcNetworkScriptDownLens (option "lxc.network.script.down" text)
+    `addOpt` scalar lxcNetworkScriptUpLens (option "lxc.network.script.up" text)
+    `addOpt` scalar lxcNetworkTypeLens (option "lxc.network.type" networkType)
+    `addOpt` scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" text)
+    `addOpt` scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" text)
+    `addOpt` scalar lxcPivotdirLens (option "lxc.pivotdir" text)
+    `addOpt` scalar lxcPtsLens (option "lxc.pts" text)
+    `addOpt` scalar lxcRebootsignalLens (option "lxc.rebootsignal" text)
+    `addOpt` scalar lxcRootfsLens (option "lxc.rootfs" text)
+    `addOpt` scalar lxcRootfsMountLens (option "lxc.rootfs.mount" text)
+    `addOpt` scalar lxcRootfsOptionsLens (option "lxc.rootfs.optionions" text)
+    `addOpt` scalar lxcSeContextLens (option "lxc.se_context" text)
+    `addOpt` scalar lxcSeccompLens (option "lxc.seccomp" text)
+    `addOpt` scalar lxcStartAutoLens (option "lxc.start.auto" switch)
+    `addOpt` scalar lxcStartDelayLens (option "lxc.start.delay" int)
+    `addOpt` scalar lxcStartOrderLens (option "lxc.start.order" int)
+    `addOpt` scalar lxcStopsignalLens (option "lxc.stopsignal" text)
+    `addOpt` scalar lxcTtyLens (option "lxc.tty" text)
+    `addOpt` scalar lxcUtsnameLens (option "lxc.utsname" text)
 
-newSerialize :: LxcConfig -> Either SerializtionError String
-newSerialize lxc =
-  note SerializtionError . unparseString (new . push lxc) $ lxc
+  -- construct option line boomerang
+  option l vp = lit l . manyl whiteSpace .  lit "=" . manyl whiteSpace . vp
 
--- not exactly an isomorphism :-)
+  text :: StringBoomerang r (String :- r)
+  text = rList1 (noneOf "\n \t")
+
+  switch = xpure (arg (:-) (\case
+                              '0' -> Off
+                              '1' -> On))
+                 (\case
+                    (On :- r)  -> Just ('1' :- r)
+                    (Off :- r) -> Just ('0' :- r))
+         . oneOf "01"
+  int =
+      xpure (arg (:-) read)
+            (Just . arg (:-) show)
+    . rList1 digit
+
+  networkType =
+      xpure (arg (:-) (read . capitalize))
+          (Just . arg (:-) (map toLower . show))
+      . (word "none" <> word  "empty" <> word  "veth"
+         <> word  "vlan" <> word  "macvlan" <> word  "phys")
+
+  capitalize :: String -> String
+  capitalize [] = []
+  capitalize (c:cs) = toUpper c:cs
+
+  addOpt :: StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
+            StringBoomerang (LxcConfig :- r) (LxcConfig :- r)->
+            StringBoomerang (LxcConfig :- r) (LxcConfig :- r)
+  addOpt p o =
+    Boomerang pf sf
+   where
+    pf = prs (o <> p)
+    sf = ser ((p . lit "\n" . o) <> p)
+
+
+  scalar :: Lens' LxcConfig (Maybe a) ->
+            StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
+            StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+  scalar l p =
+    xpure (\(v :- lxc :- r) -> set l v lxc :- r)
+          (\(lxc :- r) -> Just (view l lxc :- lxc :- r))
+    . xpure (hdMap Just)
+            (\case
+              Just v :- r -> Just (v :- r)
+              Nothing :- r -> Nothing)
+    . p
+
+  vector :: Lens' LxcConfig [a] ->
+            StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
+            StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+  vector l p =
+    Boomerang vpf vsf
+   where
+    -- parse one at a time
+    vpf = prs (process . rList p)
+    -- print all at ones
+    vsf = ser (process . rList (p . eol))
+    process =
+      xpure (\(v :- lxc :- r) -> over l (v ++ ) lxc :- r)
+            (\(lxc :- r) -> let v = view l lxc
+                            in if null v
+                                then Nothing
+                                else Just (v :- lxc :-r))
+
 ignoreWhen :: (Char -> Bool) -> StringBoomerang r r
 ignoreWhen p = Boomerang
   (Parser $ \tok pos ->
@@ -265,201 +352,21 @@ ignoreWhen p = Boomerang
   )
   (\r -> [(id, r)])
 
--- fc = FC
---   lxcAaProfileLens
---   ((hdMap Just (lit "lxc.aa_profile" . lit "=" . value)) <> push Nothing)
---  FC lxcArchLens (hdMap Just (lit "lxc.arch" . lit "=" . value) <> push Nothing) :- ()
-
--- boomerang for parse: Boomerang () a
--- fc2parser :: FC a -> StringBoomerang () LxcConfig -> StringBoomerang () LxcConfig
--- fc2parser (FC l p) b =
---   xpure (\(v :- lxc) -> set l v lxc)
---         (\lxc -> Just (view l lxc :- lxc))
---   . p . b
--- fc2parser (FC l p :- t) r =
---   (xpure (arg (:-) (set l)) undefined . p) <> fc2parser t r
-
-fieldsConfig = HashMap.fromList
-  [ ("lxc.aa_allow_incomplete", TextField lxcAaAllowIncompleteLens)
-  , ("lxc.aa_profile", TextField lxcAaProfileLens)
-  , ("lxc.arch", TextField lxcArchLens)
-  , ("lxc.autodev", SwitchField lxcAutodevLens)
-  , ("lxc.cap.drop", TextField lxcCapDropLens)
-  , ("lxc.cap.keep", TextField lxcCapKeepLens)
-  , ("lxc.cgroup", TextField lxcCgroupLens)
-  , ("lxc.console", TextField lxcConsoleLens)
-  , ("lxc.console.logfile", TextField lxcConsoleLogfileLens)
-  , ("lxc.devttydir", TextField lxcDevttydirLens)
-  , ("lxc.environment", ListField lxcEnvironmentLens)
-  , ("lxc.ephemeral", TextField lxcEphemeralLens)
-  , ("lxc.group", TextField lxcGroupLens)
-  , ("lxc.haltsignal", TextField lxcHaltsignalLens)
-  , ("lxc.hook", TextField lxcHookLens)
-  , ("lxc.hook.autodev", TextField lxcHookAutodevLens)
-  , ("lxc.hook.clone", TextField lxcHookCloneLens)
-  , ("lxc.hook.destroy", TextField lxcHookDestroyLens)
-  , ("lxc.hook.mount", TextField lxcHookMountLens)
-  , ("lxc.hook.post-stop", TextField lxcHookPostStopLens)
-  , ("lxc.hook.pre-mount", TextField lxcHookPreMountLens)
-  , ("lxc.hook.pre-start", TextField lxcHookPreStartLens)
-  , ("lxc.hook.start", TextField lxcHookStartLens)
-  , ("lxc.hook.stop", TextField lxcHookStopLens)
-  , ("lxc.id_map", TextField lxcIdMapLens)
-  , ("lxc.include", ListField lxcIncludeLens)
-  , ("lxc.init_cmd", TextField lxcInitCmdLens)
-  , ("lxc.init_gid", TextField lxcInitGidLens)
-  , ("lxc.init_uid", TextField lxcInitUidLens)
-  , ("lxc.kmsg", SwitchField lxcKmsgLens)
-  , ("lxc.logfile", TextField lxcLogfileLens)
-  , ("lxc.loglevel", TextField lxcLoglevelLens)
-  , ("lxc.monitor.unshare", TextField lxcMonitorUnshareLens)
-  , ("lxc.mount", TextField lxcMountLens)
-  , ("lxc.mount.auto", TextField lxcMountAutoLens)
-  , ("lxc.mount.entry", TextField lxcMountEntryLens)
-  , ("lxc.network", TextField lxcNetworkLens)
-  , ("lxc.network.flags", TextField lxcNetworkFlagsLens)
-  , ("lxc.network.hwaddr", TextField lxcNetworkHwaddrLens)
-  , ("lxc.network.ipv4", TextField lxcNetworkIpv4Lens)
-  , ("lxc.network.ipv4.gateway", TextField lxcNetworkIpv4GatewayLens)
-  , ("lxc.network.ipv6", TextField lxcNetworkIpv6Lens)
-  , ("lxc.network.ipv6.gateway", TextField lxcNetworkIpv6GatewayLens)
-  , ("lxc.network.link", TextField lxcNetworkLinkLens)
-  , ("lxc.network.macvlan.mode", TextField lxcNetworkMacvlanModeLens)
-  , ("lxc.network.mtu", TextField lxcNetworkMtuLens)
-  , ("lxc.network.name", TextField lxcNetworkNameLens)
-  , ("lxc.network.script.down", TextField lxcNetworkScriptDownLens)
-  , ("lxc.network.script.up", TextField lxcNetworkScriptUpLens)
-  , ("lxc.network.type", NetworkTypeField lxcNetworkTypeLens)
-  , ("lxc.network.veth.pair", TextField lxcNetworkVethPairLens)
-  , ("lxc.network.vlan.id", TextField lxcNetworkVlanIdLens)
-  , ("lxc.pivotdir", TextField lxcPivotdirLens)
-  , ("lxc.pts", TextField lxcPtsLens)
-  , ("lxc.rebootsignal", TextField lxcRebootsignalLens)
-  , ("lxc.rootfs", TextField lxcRootfsLens)
-  , ("lxc.rootfs.mount", TextField lxcRootfsMountLens)
-  , ("lxc.rootfs.options", TextField lxcRootfsOptionsLens)
-  , ("lxc.se_context", TextField lxcSeContextLens)
-  , ("lxc.seccomp", TextField lxcSeccompLens)
-  , ("lxc.start.auto", SwitchField lxcStartAutoLens)
-  , ("lxc.start.delay", IntField lxcStartDelayLens)
-  , ("lxc.start.order", IntField lxcStartOrderLens)
-  , ("lxc.stopsignal", TextField lxcStopsignalLens)
-  , ("lxc.tty", TextField lxcTtyLens)
-  , ("lxc.utsname", TextField lxcUtsnameLens)
-  ]
-
-type Key = String
-data Value = VText String
-           | VInt Int
-           | VSwitch Switch
-           -- used to combine options: environment, include
-           | VListOfTextValues [String]
-           | VNetworkType NetworkType
-  deriving (Eq, Show)
-
-data ConfigLine = EmptyLine | CommentLine String | OptionLine Key Value
-  deriving (Eq, Show)
-
-noneOf :: String -> StringBoomerang r (Char :- r)
-noneOf l = satisfy (not . (`elem` l))
-
 oneOf :: String -> StringBoomerang r (Char :- r)
 oneOf l = satisfy (`elem` l)
 
-eol :: StringBoomerang r r
-eol = lit "\n"
+noneOf :: String -> StringBoomerang r (Char :- r)
+noneOf l = satisfy (not . (`elem` l))
 
 word :: String -> StringBoomerang r (String :- r)
 word []     = rNil
 word (x:xs) = rCons . char x . word xs
 
-value :: StringBoomerang r (String :- r)
-value = rList1 (noneOf "\n \t")
-
-optionLine :: StringBoomerang r (ConfigLine :- r)
-optionLine =
-  foldl' (<>) mempty
-    (map (\(l, vp) -> option . word l . manyl whiteSpace
-                   .  lit "=" . manyl whiteSpace . vp)
-      [(n, fc2prs fc) | (n, fc) <- HashMap.toList fieldsConfig])
- where
-  option = xpure (arg (arg (:-)) OptionLine)
-                 (\case
-                    (OptionLine k v :- r) -> Just (k :- v :- r)
-                    otherwise -> Nothing)
-  fc2prs (TextField _) = text
-  fc2prs (SwitchField _) = switch
-  fc2prs (ListField _) = text
-  fc2prs (IntField _) = int
-  fc2prs (NetworkTypeField _) = networkType
-
-  text :: StringBoomerang r (Value :- r)
-  text = xpure (arg (:-) VText)
-               (\case
-                  (VText t :- r) -> Just (t :- r)
-                  otherwise          -> Nothing)
-       . value
-
-  switch :: StringBoomerang r (Value :- r)
-  switch = xpure (arg (:-) (\case
-                              '0' -> VSwitch Off
-                              '1' -> VSwitch On))
-                 (\case
-                    (VSwitch On :- r)  -> Just ('1' :- r)
-                    (VSwitch Off :- r) -> Just ('0' :- r)
-                    otherwise          -> Nothing)
-         . oneOf "01"
-
-  int :: StringBoomerang r (Value :- r)
-  int =
-    xpure (arg (:-) VInt)
-          (\case
-            (VInt i :- r) -> Just (i :- r)
-            otherwise     -> Nothing)
-    . xpure (arg (:-) read)
-            (Just . arg (:-) show)
-    . rList1 digit
-
-  networkType :: StringBoomerang r (Value :- r)
-  networkType =
-    xpure (arg (:-) VNetworkType)
-          (\case
-            (VNetworkType nt :- r) -> Just (nt :- r)
-            otherwise              -> Nothing)
-    . xpure (arg (:-) (read . capitalize))
-          (Just . arg (:-) (map toLower . show))
-    . (word "none" <> word  "empty" <> word  "veth"
-       <> word  "vlan" <> word  "macvlan" <> word  "phys")
-
-  capitalize :: String -> String
-  capitalize [] = []
-  capitalize (c:cs) = toUpper c:cs
+eol :: StringBoomerang r r
+eol = lit "\n"
 
 whiteSpace :: StringBoomerang r r
 whiteSpace = lit " " <> lit "\t"
-
-nonEmptyConfigLine :: StringBoomerang r (ConfigLine :- r)
-nonEmptyConfigLine =
-     comment
-  <> optionLine
- where
-  comment = xpure (arg (:-) CommentLine)
-                  (\case
-                    (CommentLine c :- r) -> Just (c :- r)
-                    otherwise -> Nothing)
-          . manyl whiteSpace . lit "#" . rList (noneOf "\n")
-
-emptyLine = xpure (\r -> EmptyLine :- r)
-                  (\case
-                    (EmptyLine :- r) -> Just r
-                    otherwise        -> Nothing)
-          . manyl whiteSpace
-
-configLines :: StringBoomerang r ([ConfigLine] :- r)
-configLines =
-  -- to simplify last new line parsing I've split empty line case
-     (rCons . nonEmptyConfigLine . (eol . configLines <> push []))
-  <> (rCons . emptyLine . eol . configLines <> manyl whiteSpace . push [])
 
 data ParsingError = MultipleOccurencesOfScalarOption String
                   | ParserError StringError
@@ -468,61 +375,10 @@ data ParsingError = MultipleOccurencesOfScalarOption String
 data SerializtionError = SerializtionError
   deriving (Eq, Show)
 
-serialize :: LxcConfig -> Either SerializtionError String
-serialize lxcConf =
-  note SerializtionError
-    . unparseString configLines
-    . foldl' fieldConfig2ConfigLine [] $ HashMap.toList fieldsConfig
- where
-  fieldConfig2ConfigLine result (k, TextField l) =
-    case view l lxcConf of
-      Just v  -> OptionLine k (VText v) : result
-      Nothing -> result
-  fieldConfig2ConfigLine result (k, SwitchField l) =
-    case view l lxcConf of
-      Just v  -> OptionLine k (VSwitch v) : result
-      Nothing -> result
-  fieldConfig2ConfigLine result (k, IntField l) =
-    case view l lxcConf of
-      Just v  -> OptionLine k (VInt v) : result
-      Nothing -> result
-  fieldConfig2ConfigLine result (k, NetworkTypeField l) =
-    case view l lxcConf of
-      Just v  -> OptionLine k (VNetworkType v) : result
-      Nothing -> result
-  fieldConfig2ConfigLine result (k, ListField l) =
-    foldl' (\r v -> OptionLine k (VText v) : r) result (view l lxcConf)
-
 parse :: String -> Either ParsingError LxcConfig
 parse conf =
-  either (Left . ParserError) lxcConfig confLns
- where
-  confLns = parseString configLines conf
-  lxcConfig = foldl' setValue (Right emptyConfig)
+  either (Left . ParserError) Right (parseString (lxcConfig . push emptyConfig) conf)
 
-  setValue :: Either ParsingError LxcConfig -> ConfigLine -> Either ParsingError LxcConfig
-  setValue eitherLxcConf confLine = do
-    lxcConf <- eitherLxcConf
-    case confLine of
-      (OptionLine k v) -> case fromJust . HashMap.lookup k $ fieldsConfig of
-                            (TextField l)        -> let (VText v') = v
-                                                    in setScalarValue lxcConf k v' l
-                                  -- use fromJust as all options are parsed based on fieldsConfig
-                            (SwitchField l)      -> let (VSwitch v') = v
-                                                    in setScalarValue lxcConf k v' l
-                            (IntField l)         -> let (VInt v') = v
-                                                    in setScalarValue lxcConf k v' l
-                            (NetworkTypeField l) -> let (VNetworkType v') = v
-                                                    in setScalarValue lxcConf k v' l
-                            (ListField l) -> let VText v' = v
-                                                in return $ over l (v':) lxcConf
-      -- skip comments and empty lines
-      otherwise -> eitherLxcConf
-   where
-    setScalarValue :: LxcConfig -> Key -> a ->
-                      Lens' LxcConfig (Maybe a) ->
-                      Either ParsingError LxcConfig
-    setScalarValue lxcConf k v l =
-      if not . null $ view l lxcConf
-        then throwError (MultipleOccurencesOfScalarOption k)
-        else return $ set l (Just v) lxcConf
+serialize :: LxcConfig -> Either SerializtionError String
+serialize lxc =
+  note SerializtionError . unparseString (lxcConfig . push lxc) $ lxc
