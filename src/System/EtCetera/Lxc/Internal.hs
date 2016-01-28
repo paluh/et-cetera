@@ -33,17 +33,34 @@ data Switch = On | Off
 data NetworkType = None | Empty | Veth | Vlan | Macvlan | Phys
   deriving (Eq, Read, Show)
 
+data Architecture = X86 | I686 | X86_64 | Amd64
+  deriving (Eq, Read, Show)
+
 -- options list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
 data LxcConfig =
   LxcConfig
     { lxcAaAllowIncomplete :: Maybe String
     , lxcAaProfile :: Maybe String
-    , lxcArch :: Maybe String
+    , lxcArch :: Maybe Architecture
     , lxcAutodev :: Maybe Switch
     , lxcCapDrop :: Maybe String
     , lxcCapKeep :: Maybe String
-    , lxcCgroup :: Maybe String
+    -- map every subsystem to list of values
+    --
+    -- for example, this:
+    --
+    -- lxc.cgroup.devices.allow = c 254:0 rm
+    -- lxc.cgroup.devices.allow = c 10:200 rwm
+    -- lxc.cgroup.devices.allow = c 10:228 rwm
+    --
+    -- will be represented as this:
+    --
+    -- fromList [("devices.allow", [ "c 254:0 rm"
+    --                             , "c 10:200 rwm"
+    --                             , "c 10:228 rwm"
+    --                             ]
+    , lxcCgroup :: HashMap.HashMap String [String]
     , lxcConsole :: Maybe String
     , lxcConsoleLogfile :: Maybe String
     , lxcDevttydir :: Maybe String
@@ -117,7 +134,7 @@ emptyConfig =
     , lxcAutodev  = Nothing
     , lxcCapDrop  = Nothing
     , lxcCapKeep  = Nothing
-    , lxcCgroup  = Nothing
+    , lxcCgroup  = HashMap.empty
     , lxcConsole  = Nothing
     , lxcConsoleLogfile  = Nothing
     , lxcDevttydir  = Nothing
@@ -179,6 +196,15 @@ emptyConfig =
     , lxcUtsname  = Nothing
     }
 
+p :: StringBoomerang r ([(String, [String])] :- r)
+p =
+  rList pair
+ where
+  pair = xpure (arg (arg (:-)) (\s1 s2 -> (s1, [s2])))
+               (\((s1, s2) :- r) -> Just (s1 :- s2 :- r))
+         . lit "test" . rList1 (noneOf "/= \n") . manyl whiteSpace
+         . lit "=" . manyl whiteSpace . rList1 (noneOf "\n")
+
 lxcConfig =
   Boomerang pf sf
  where
@@ -197,11 +223,11 @@ lxcConfig =
   anyOption =
              scalar lxcAaAllowIncompleteLens (option "lxc.aa_allow_incomplete" text)
     `addOpt` scalar lxcAaProfileLens (option "lxc.aa_profile" text)
-    `addOpt` scalar lxcArchLens (option "lxc.arch" text)
+    `addOpt` scalar lxcArchLens (option "lxc.arch" architecture)
     `addOpt` scalar lxcAutodevLens (option "lxc.autodev" switch)
     `addOpt` scalar lxcCapDropLens (option "lxc.cap.drop" text)
     `addOpt` scalar lxcCapKeepLens (option "lxc.cap.keep" text)
-    `addOpt` scalar lxcCgroupLens (option "lxc.cgroup" text)
+    `addOpt` mapping lxcCgroupLens "lxc.cgroup."
     `addOpt` scalar lxcConsoleLens (option "lxc.console" text)
     `addOpt` scalar lxcConsoleLogfileLens (option "lxc.console.logfile" text)
     `addOpt` scalar lxcDevttydirLens (option "lxc.devttydir" text)
@@ -305,11 +331,35 @@ lxcConfig =
                                 then Nothing
                                 else Just (v :- lxc :-r))
 
+  mapping :: Lens' LxcConfig (HashMap.HashMap String [String]) ->
+             String ->
+             StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+  mapping l k =
+    --Boomerang pf undefined
+    undefined
+   where
+   --- pf = prs (xpure (\(pairs :- lxc :- r) ->
+   ---                     over l
+   ---                          (HashMap.unionWith (++) (HashMap.fromList pairs))
+   ---                          lxc :- r)
+   ---                 undefined . rList pair)
+    pair = xpure (arg (arg (:-)) (\s1 s2 -> (s1, [s2])))
+                 (\((s1, [s2]) :- r) -> Just (s1 :- s2 :- r))
+           . lit k . rList1 (noneOf "/= \n") . manyl whiteSpace
+           . lit "=" . manyl whiteSpace . text
+   --  p = lit k . rList1 (noneOf "/= \n") . manyl whiteSpace
+   --    . lit "=" . manyl whiteSpace . text
+   --  pf = prs ((xpure (\(s :- v :- lxc :- r) ->
+   --                      over l (HashMap.insertWith
+   --                                (\[n] o -> n:o) s v) lxc :- r)
+   --                  undefined) . rList p)
+
+   --  where
   -- construct option line boomerang
   option l vp = lit l . manyl whiteSpace .  lit "=" . manyl whiteSpace . vp
 
   text :: StringBoomerang r (String :- r)
-  text = rList1 (noneOf "\n \t")
+  text = rCons . noneOf "\n \t" . rList1 (noneOf "\n")
 
   switch = xpure (arg (:-) (\case
                               '0' -> Off
@@ -328,6 +378,12 @@ lxcConfig =
           (Just . arg (:-) (map toLower . show))
       . (word "none" <> word  "empty" <> word  "veth"
          <> word  "vlan" <> word  "macvlan" <> word  "phys")
+
+  architecture =
+      xpure (arg (:-) (read . capitalize))
+          (Just . arg (:-) (map toLower . show))
+      . (   word "x86" <> word  "i686"
+         <> word  "x86_64" <> word  "amd64")
 
   capitalize :: String -> String
   capitalize [] = []
