@@ -73,7 +73,7 @@ data LxcConfig =
     , lxcMount :: Maybe String
     , lxcMountAuto :: Maybe String
     , lxcMountEntry :: Maybe String
-    , lxcNetwork :: Maybe String
+    , lxcNetworkType :: Maybe NetworkType
     , lxcNetworkFlags :: Maybe String
     , lxcNetworkHwaddr :: Maybe String
     , lxcNetworkIpv4 :: Maybe String
@@ -86,7 +86,6 @@ data LxcConfig =
     , lxcNetworkName :: Maybe String
     , lxcNetworkScriptDown :: Maybe String
     , lxcNetworkScriptUp :: Maybe String
-    , lxcNetworkType :: Maybe NetworkType
     , lxcNetworkVethPair :: Maybe String
     , lxcNetworkVlanId :: Maybe String
     , lxcPivotdir :: Maybe String
