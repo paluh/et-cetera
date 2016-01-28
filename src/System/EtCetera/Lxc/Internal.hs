@@ -146,7 +146,6 @@ emptyConfig =
     , lxcMount  = Nothing
     , lxcMountAuto  = Nothing
     , lxcMountEntry  = Nothing
-    , lxcNetwork  = Nothing
     , lxcNetworkFlags  = Nothing
     , lxcNetworkHwaddr  = Nothing
     , lxcNetworkIpv4  = Nothing
@@ -230,7 +229,7 @@ lxcConfig =
     `addOpt` scalar lxcMountLens (option "lxc.mount" text)
     `addOpt` scalar lxcMountAutoLens (option "lxc.mount.auto" text)
     `addOpt` scalar lxcMountEntryLens (option "lxc.mount.entry" text)
-    `addOpt` scalar lxcNetworkLens (option "lxc.network" text)
+    `addOpt` scalar lxcNetworkTypeLens (option "lxc.network.type" networkType)
     `addOpt` scalar lxcNetworkFlagsLens (option "lxc.network.flags" text)
     `addOpt` scalar lxcNetworkHwaddrLens (option "lxc.network.hwaddr" text)
     `addOpt` scalar lxcNetworkIpv4Lens (option "lxc.network.ipv4" text)
@@ -243,7 +242,6 @@ lxcConfig =
     `addOpt` scalar lxcNetworkNameLens (option "lxc.network.name" text)
     `addOpt` scalar lxcNetworkScriptDownLens (option "lxc.network.script.down" text)
     `addOpt` scalar lxcNetworkScriptUpLens (option "lxc.network.script.up" text)
-    `addOpt` scalar lxcNetworkTypeLens (option "lxc.network.type" networkType)
     `addOpt` scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" text)
     `addOpt` scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" text)
     `addOpt` scalar lxcPivotdirLens (option "lxc.pivotdir" text)
