@@ -33,6 +33,30 @@ data Switch = On | Off
 data NetworkType = None | Empty | Veth | Vlan | Macvlan | Phys
   deriving (Eq, Read, Show)
 
+data NetworkConfig =
+  NetworkConfig
+    -- types begin every network section
+    { networkType :: Maybe NetworkType
+    , networkFlags :: Maybe String
+    , networkHwaddr :: Maybe String
+    , networkIpv4 :: Maybe String
+    , networkIpv4Gateway :: Maybe String
+    , networkIpv6 :: Maybe String
+    , networkIpv6Gateway :: Maybe String
+    , networkLink :: Maybe String
+    , networkMacvlanMode :: Maybe String
+    , networkMtu :: Maybe String
+    , networkName :: Maybe String
+    , networkScriptDown :: Maybe String
+    , networkScriptUp :: Maybe String
+    , networkVethPair :: Maybe String
+    , networkVlanId :: Maybe String
+    }
+  deriving (Eq, Show)
+
+makeLensesWith ?? ''NetworkConfig $ lensRules
+    & lensField .~ \_ _ name -> [TopName (mkName $ nameBase name ++ "Lens")]
+
 -- options list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
 data LxcConfig =
@@ -73,22 +97,7 @@ data LxcConfig =
     , lxcMount :: Maybe String
     , lxcMountAuto :: Maybe String
     , lxcMountEntry :: Maybe String
-    , lxcNetwork :: Maybe String
-    , lxcNetworkFlags :: Maybe String
-    , lxcNetworkHwaddr :: Maybe String
-    , lxcNetworkIpv4 :: Maybe String
-    , lxcNetworkIpv4Gateway :: Maybe String
-    , lxcNetworkIpv6 :: Maybe String
-    , lxcNetworkIpv6Gateway :: Maybe String
-    , lxcNetworkLink :: Maybe String
-    , lxcNetworkMacvlanMode :: Maybe String
-    , lxcNetworkMtu :: Maybe String
-    , lxcNetworkName :: Maybe String
-    , lxcNetworkScriptDown :: Maybe String
-    , lxcNetworkScriptUp :: Maybe String
-    , lxcNetworkType :: Maybe NetworkType
-    , lxcNetworkVethPair :: Maybe String
-    , lxcNetworkVlanId :: Maybe String
+    , lxcNetwork :: [NetworkConfig]
     , lxcPivotdir :: Maybe String
     , lxcPts :: Maybe Int
     , lxcRebootsignal :: Maybe String
@@ -147,22 +156,7 @@ emptyConfig =
     , lxcMount  = Nothing
     , lxcMountAuto  = Nothing
     , lxcMountEntry  = Nothing
-    , lxcNetwork  = Nothing
-    , lxcNetworkFlags  = Nothing
-    , lxcNetworkHwaddr  = Nothing
-    , lxcNetworkIpv4  = Nothing
-    , lxcNetworkIpv4Gateway  = Nothing
-    , lxcNetworkIpv6  = Nothing
-    , lxcNetworkIpv6Gateway  = Nothing
-    , lxcNetworkLink  = Nothing
-    , lxcNetworkMacvlanMode  = Nothing
-    , lxcNetworkMtu  = Nothing
-    , lxcNetworkName  = Nothing
-    , lxcNetworkScriptDown  = Nothing
-    , lxcNetworkScriptUp  = Nothing
-    , lxcNetworkType  = Nothing
-    , lxcNetworkVethPair  = Nothing
-    , lxcNetworkVlanId  = Nothing
+    , lxcNetwork  = []
     , lxcPivotdir  = Nothing
     , lxcPts  = Nothing
     , lxcRebootsignal  = Nothing
@@ -178,6 +172,27 @@ emptyConfig =
     , lxcTty  = Nothing
     , lxcUtsname  = Nothing
     }
+
+emptyNetworkConfig =
+  NetworkConfig
+    { networkFlags  = Nothing
+    , networkHwaddr  = Nothing
+    , networkIpv4  = Nothing
+    , networkIpv4Gateway  = Nothing
+    , networkIpv6  = Nothing
+    , networkIpv6Gateway  = Nothing
+    , networkLink  = Nothing
+    , networkMacvlanMode  = Nothing
+    , networkMtu  = Nothing
+    , networkName  = Nothing
+    , networkScriptDown  = Nothing
+    , networkScriptUp  = Nothing
+    , networkType  = Nothing
+    , networkVethPair  = Nothing
+    , networkVlanId  = Nothing
+    }
+
+-- data Printer = Printer (\b -> Maybe (
 
 lxcConfig =
   Boomerang pf sf
@@ -231,22 +246,22 @@ lxcConfig =
     `addOpt` scalar lxcMountLens (option "lxc.mount" text)
     `addOpt` scalar lxcMountAutoLens (option "lxc.mount.auto" text)
     `addOpt` scalar lxcMountEntryLens (option "lxc.mount.entry" text)
-    `addOpt` scalar lxcNetworkLens (option "lxc.network" text)
-    `addOpt` scalar lxcNetworkFlagsLens (option "lxc.network.flags" text)
-    `addOpt` scalar lxcNetworkHwaddrLens (option "lxc.network.hwaddr" text)
-    `addOpt` scalar lxcNetworkIpv4Lens (option "lxc.network.ipv4" text)
-    `addOpt` scalar lxcNetworkIpv4GatewayLens (option "lxc.network.ipv4.gateway" text)
-    `addOpt` scalar lxcNetworkIpv6Lens (option "lxc.network.ipv6" text)
-    `addOpt` scalar lxcNetworkIpv6GatewayLens (option "lxc.network.ipv6.gateway" text)
-    `addOpt` scalar lxcNetworkLinkLens (option "lxc.network.link" text)
-    `addOpt` scalar lxcNetworkMacvlanModeLens (option "lxc.network.macvlan.mode" text)
-    `addOpt` scalar lxcNetworkMtuLens (option "lxc.network.mtu" text)
-    `addOpt` scalar lxcNetworkNameLens (option "lxc.network.name" text)
-    `addOpt` scalar lxcNetworkScriptDownLens (option "lxc.network.script.down" text)
-    `addOpt` scalar lxcNetworkScriptUpLens (option "lxc.network.script.up" text)
-    `addOpt` scalar lxcNetworkTypeLens (option "lxc.network.type" networkType)
-    `addOpt` scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" text)
-    `addOpt` scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" text)
+    -- `addOpt` scalar lxcNetworkTypeLens (option "lxc.network.type" networkType)
+    -- `addOpt` scalar lxcNetworkLens (option "lxc.network" text)
+    -- `addOpt` scalar lxcNetworkFlagsLens (option "lxc.network.flags" text)
+    -- `addOpt` scalar lxcNetworkHwaddrLens (option "lxc.network.hwaddr" text)
+    -- `addOpt` scalar lxcNetworkIpv4Lens (option "lxc.network.ipv4" text)
+    -- `addOpt` scalar lxcNetworkIpv4GatewayLens (option "lxc.network.ipv4.gateway" text)
+    -- `addOpt` scalar lxcNetworkIpv6Lens (option "lxc.network.ipv6" text)
+    -- `addOpt` scalar lxcNetworkIpv6GatewayLens (option "lxc.network.ipv6.gateway" text)
+    -- `addOpt` scalar lxcNetworkLinkLens (option "lxc.network.link" text)
+    -- `addOpt` scalar lxcNetworkMacvlanModeLens (option "lxc.network.macvlan.mode" text)
+    -- `addOpt` scalar lxcNetworkMtuLens (option "lxc.network.mtu" text)
+    -- `addOpt` scalar lxcNetworkNameLens (option "lxc.network.name" text)
+    -- `addOpt` scalar lxcNetworkScriptDownLens (option "lxc.network.script.down" text)
+    -- `addOpt` scalar lxcNetworkScriptUpLens (option "lxc.network.script.up" text)
+    -- `addOpt` scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" text)
+    -- `addOpt` scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" text)
     `addOpt` scalar lxcPivotdirLens (option "lxc.pivotdir" text)
     `addOpt` scalar lxcPtsLens (option "lxc.pts" int)
     `addOpt` scalar lxcRebootsignalLens (option "lxc.rebootsignal" text)
@@ -288,6 +303,15 @@ lxcConfig =
               Nothing :- r -> Nothing)
     . p
 
+  -- networkScalar :: Lens NetworkConfig (Maybe a) ->
+  --                  StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ())
+  --                  StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
+  -- networkScalar nl p =
+  --     undefined
+  --   where
+  --     l = lxcNetworkLens . nl
+
+
   vector :: Lens' LxcConfig [a] ->
             StringBoomerang (LxcConfig :- ()) (a :- LxcConfig :- ()) ->
             StringBoomerang (LxcConfig :- ()) (LxcConfig :- ())
@@ -323,16 +347,15 @@ lxcConfig =
             (Just . arg (:-) show)
     . rList1 digit
 
-  networkType =
-      xpure (arg (:-) (read . capitalize))
-          (Just . arg (:-) (map toLower . show))
-      . (word "none" <> word  "empty" <> word  "veth"
-         <> word  "vlan" <> word  "macvlan" <> word  "phys")
+  -- networkType =
+  --     xpure (arg (:-) (read . capitalize))
+  --         (Just . arg (:-) (map toLower . show))
+  --     . (word "none" <> word  "empty" <> word  "veth"
+  --        <> word  "vlan" <> word  "macvlan" <> word  "phys")
 
   capitalize :: String -> String
   capitalize [] = []
   capitalize (c:cs) = toUpper c:cs
-
 
 ignoreWhen :: (Char -> Bool) -> StringBoomerang r r
 ignoreWhen p = Boomerang
