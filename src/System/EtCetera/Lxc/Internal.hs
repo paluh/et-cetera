@@ -90,7 +90,7 @@ data LxcConfig =
     , lxcNetworkVethPair :: Maybe String
     , lxcNetworkVlanId :: Maybe String
     , lxcPivotdir :: Maybe String
-    , lxcPts :: Maybe String
+    , lxcPts :: Maybe Int
     , lxcRebootsignal :: Maybe String
     , lxcRootfs :: Maybe String
     , lxcRootfsMount :: Maybe String
@@ -248,7 +248,7 @@ lxcConfig =
     `addOpt` scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" text)
     `addOpt` scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" text)
     `addOpt` scalar lxcPivotdirLens (option "lxc.pivotdir" text)
-    `addOpt` scalar lxcPtsLens (option "lxc.pts" text)
+    `addOpt` scalar lxcPtsLens (option "lxc.pts" int)
     `addOpt` scalar lxcRebootsignalLens (option "lxc.rebootsignal" text)
     `addOpt` scalar lxcRootfsLens (option "lxc.rootfs" text)
     `addOpt` scalar lxcRootfsMountLens (option "lxc.rootfs.mount" text)

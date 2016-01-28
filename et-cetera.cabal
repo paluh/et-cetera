@@ -1,5 +1,5 @@
 name:                et-cetera
-version:             0.1.0.0
+version:             0.1.1.0
 synopsis:            Invertible parsers for some *nix configuration files
 -- description:
 homepage:            github.com/paluh/et-cetera
