@@ -25,7 +25,8 @@ import           Text.Boomerang.Pos (incMajor, incMinor)
 import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, unparse, xpure)
 import           Text.Boomerang.String (anyChar, char, digit, lit, parseString, satisfy,
                                         StringBoomerang, StringError, unparseString)
-
+import           System.EtCetera.Internal.Boomerangs (ignoreWhen, noneOf, oneOf,
+                                                      whiteSpace, word)
 
 data Switch = On | Off
   deriving (Eq, Show)
@@ -185,7 +186,7 @@ lxcConfig =
   --      It is just easier to build
   --      serializer and parser using boomerang's
   --      combinators.
-  parserBoomerang = (lit "#" . manyl (ignoreWhen (not . (== '\n')))
+  parserBoomerang = (lit "#" . manyl (ignoreWhen (/= '\n'))
                      <> manyl whiteSpace
                      <> anyOption)
                   . opt ((eol . parserBoomerang) <> eol)
@@ -330,38 +331,8 @@ lxcConfig =
   capitalize [] = []
   capitalize (c:cs) = toUpper c:cs
 
-
-ignoreWhen :: (Char -> Bool) -> StringBoomerang r r
-ignoreWhen p = Boomerang
-  (Parser $ \tok pos ->
-       case tok of
-         []        -> mkParserError pos [EOI "input"]
-         (c:cs)
-             | p c ->
-                 [Right ((id, cs),
-                          if c == '\n'
-                            then incMajor 1 pos
-                            else incMinor 1 pos)]
-             | otherwise ->
-                 mkParserError pos [SysUnExpect $ show c]
-  )
-  (\r -> [(id, r)])
-
-oneOf :: String -> StringBoomerang r (Char :- r)
-oneOf l = satisfy (`elem` l)
-
-noneOf :: String -> StringBoomerang r (Char :- r)
-noneOf l = satisfy (not . (`elem` l))
-
-word :: String -> StringBoomerang r (String :- r)
-word []     = rNil
-word (x:xs) = rCons . char x . word xs
-
 eol :: StringBoomerang r r
 eol = lit "\n"
-
-whiteSpace :: StringBoomerang r r
-whiteSpace = lit " " <> lit "\t"
 
 data ParsingError = MultipleOccurencesOfScalarOption String
                   | ParserError StringError

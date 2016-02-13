@@ -164,7 +164,7 @@ floatNumber =
   e = opt (rJoin (\s -> (s, "")) . (rCons . oneOf "eE") . (rCons . oneOf "+-") . rList1 digit) . push ""
   -- fractional part
   f = (rCons . char '.') . (rList1 digit <> push "0")
-  fe = rJoin (break (`elem` "eE")) . f . e
+  fe = rJoin (break (`elem` ("eE" :: String))) . f . e
   -- integer part
   i = opt (rCons . oneOf "+-") . (rList1 digit <> push "0")
   -- all together
