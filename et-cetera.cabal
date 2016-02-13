@@ -20,6 +20,7 @@ library
   build-depends:        base >=4.8 && <4.9
                       , boomerang
                       , errors
+                      , generic-deriving
                       , hspec
                       , iproute
                       , lens
@@ -27,6 +28,7 @@ library
                       , optional-args
                       , semigroups
                       , template-haskell
+                      , text
                       , unordered-containers
   hs-source-dirs:     src, test
   default-language:   Haskell2010
@@ -34,15 +36,21 @@ library
                       , System.EtCetera.Collectd
                       , System.EtCetera.Lxc
                       , System.EtCetera.Lxc.Internal
+                      , System.EtCetera.Redis
+                      , System.EtCetera.Redis.V2_8
+                      , System.EtCetera.Internal
+                      , System.EtCetera.Internal.Boomerangs
+                      , System.EtCetera.Internal.Prim
+                      , System.EtCetera.Internal.Utils
 
-test-suite et-cetera-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Spec.hs
+executable et-cetera-examples
+  hs-source-dirs:      src
+  main-is:             Main.hs
   build-depends:       base >=4.8 && <4.9
                      , boomerang
                      , errors
                      , et-cetera
+                      , generic-deriving
                      , hspec
                      , iproute
                      , lens
@@ -50,6 +58,27 @@ test-suite et-cetera-test
                      , optional-args
                      , semigroups
                      , template-haskell
+                     , text
+                     , unordered-containers
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  default-language:     Haskell2010
+
+test-suite et-cetera-test
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base >=4.8.2 && <4.9
+                     , boomerang
+                     , errors
+                     , et-cetera
+                     , generic-deriving
+                     , hspec
+                     , iproute
+                     , lens
+                     , mtl
+                     , optional-args
+                     , semigroups
+                     , template-haskell
+                     , text
                      , unordered-containers
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:     Haskell2010
