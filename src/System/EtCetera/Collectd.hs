@@ -36,6 +36,7 @@ import           Text.Boomerang.Prim (bestErrors, Boomerang(..), Parser(..), xma
 import           Text.Boomerang.Pos (ErrorPosition(..), InitialPosition(..), MajorMinorPos, Pos)
 import           Text.Boomerang.String (alpha, anyChar, char, digit, lit, satisfy, StringBoomerang(..),
                                         StringError)
+import           System.EtCetera.Internal.Boomerangs (quotedString)
 
 type Name = String
 type Arg = String
@@ -62,59 +63,6 @@ eol = lit "\n" <> lit "\r\n"
 
 eolOrComment :: StringBoomerang r r
 eolOrComment = manyl whiteSpace . (comment <> eol)
-
-data QuotedStringPart = Escaped String | Literal String
-  deriving (Eq, Show)
-type QuotedString = [QuotedStringPart]
-
-
--- | Converts a router for a value @a@ to a router for a list of @a@, with a separator.
-rListSep' :: Boomerang e tok r (a :- r) -> Boomerang e tok ([a] :- r) ([a] :- r) -> Boomerang e tok r ([a] :- r)
-rListSep' r sep = chainl (rCons . duck1 r) sep . rNil
-
-
-quotedString :: StringBoomerang r (QuotedString :- r)
-quotedString =
-  lit "\"" .
-    ((opt (rCons . esc) . chrsEscRec) <>
-     (opt (rCons . chrs) . escChrsRec) <>
-     (rCons . esc . rNil) <>
-     (rCons . chrs . rNil)
-     ) .
-  lit "\""
- where
-  chrsEscRec :: StringBoomerang r (QuotedString :- r)
-  chrsEscRec = rCons . chrs . rCons . esc . (chrsEscRec <> rNil)
-
-  escChrsRec :: StringBoomerang r (QuotedString :- r)
-  escChrsRec = rCons . esc . rCons . chrs . (escChrsRec <> rNil)
-
-  chrs :: StringBoomerang r (QuotedStringPart :- r)
-  chrs =
-    xmaph Literal fromLiteral (rList1 (noneOf "\\\""))
-   where
-    fromLiteral qsp =
-      case qsp of
-        Literal s -> Just s
-        otherwise -> Nothing
-
-  esc :: StringBoomerang r (QuotedStringPart :- r)
-  esc =
-    xmaph Escaped fromEscaped (rList1 (lit "\\\n" . delete (rList1 (oneOf " \t")) . push '\t' <> lit "\\" . anyChar))
-   where
-    fromEscaped qsp =
-      case qsp of
-        Escaped s -> Just s
-        otherwise -> Nothing
-
-unquotedString :: StringBoomerang r (Value :- r)
-unquotedString =
-  xpure (arg (:-) StringValue) serializer . rList1 (alpha <> digit)
- where
-  serializer :: (Value :- r) -> Maybe (String :- r)
-  serializer (StringValue s :- r) = Just (s :- r)
-  serializer _                    = Nothing
-
 
 -- HEX_NUMBER 0[xX][0-9a-fA-F]+
 hexNumber :: StringBoomerang r (Value :- r)
@@ -229,32 +177,25 @@ comment :: StringBoomerang r r
 comment =
   delete (manyl whiteSpace . rCons . char '#' . rList1 (noneOf "\n")) . eol
 
+unquotedString :: StringBoomerang r (Value :- r)
+unquotedString =
+  xpure (arg (:-) StringValue) serializer . rList1 (alpha <> digit)
+ where
+  serializer (StringValue s :- r) = Just (s :- r)
+  serializer _                    = Nothing
+
+string =
+  -- XXX: test whether this is serialized correctly
+  unquotedString <> u . quotedString
+ where
+  u = xpure (arg (:-) StringValue) serializer
+  serializer (StringValue s :- r) = Just (s :- r)
+  serializer _                    = Nothing
+
 identifier = unquotedString
 openBracket = char '<'
 closeBracket = char '>'
 
-unquote :: StringBoomerang (QuotedString :- r) (Value :- r)
-unquote = xpure (arg (:-) u) q
- where
-  u = StringValue . concatMap u'
-  u' (Escaped s) = s
-  u' (Literal s) = s
-
-  q (StringValue s :- r) = Just (q' s :- r)
-  q _                    = Nothing
-  q' []       = []
-  q' ('\\':r) = qCons (Escaped "\\") (q' r)
-  q' ('"':r)  = qCons (Escaped "\"") (q' r)
-  q' (c:r)    = qCons (Literal [c]) (q' r)
-
-  qCons :: QuotedStringPart -> QuotedString -> QuotedString
-  qCons (Literal [c]) (Literal t : s) = Literal (c:t) : s
-  qCons (Literal h) (Literal t : s) = Literal (h ++ t) : s
-  qCons (Escaped [c]) (Escaped t : s) = Escaped (c:t) : s
-  qCons (Escaped h) (Escaped t : s) = Escaped (h ++ t) : s
-  qCons e s = e : s
-
-string = unquotedString <> unquote . quotedString
 
 -- XXX: Still missing parsers
 -- PORT (6(5(5(3[0-5]|[0-2][0-9])|[0-4][0-9][0-9])|[0-4][0-9][0-9][0-9])|[1-5][0-9][0-9][0-9][0-9]|[1-9][0-9]?[0-9]?[0-9]?)

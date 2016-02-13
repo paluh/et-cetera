@@ -11,8 +11,8 @@ import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rLi
 import           Text.Boomerang.Error (ErrorMsg(..), mkParserError, ParserError(..))
 import           Text.Boomerang.HStack (arg, hdMap, (:-)(..))
 import           Text.Boomerang.Pos (incMajor, incMinor)
-import           Text.Boomerang.Prim (Boomerang(..), Parser(..))
-import           Text.Boomerang.String (char, lit, satisfy, StringBoomerang, StringError)
+import           Text.Boomerang.Prim (Boomerang(..), Parser(..), xmaph, xpure)
+import           Text.Boomerang.String (anyChar, char, lit, satisfy, StringBoomerang, StringError)
 import qualified Text.Boomerang.String
 import           System.EtCetera.Internal.Prim (Prs(..), runPrs)
 
@@ -46,6 +46,67 @@ ignoreWhen p = Boomerang
 
 eol :: StringBoomerang r r
 eol = lit "\n"
+
+data QuotedStringPart = Escaped String | Literal String
+  deriving (Eq, Show)
+type QuotedString = [QuotedStringPart]
+
+
+quotedString' :: StringBoomerang r (QuotedString :- r)
+quotedString' =
+  lit "\"" .
+    ((opt (rCons . esc) . chrsEscRec) <>
+     (opt (rCons . chrs) . escChrsRec) <>
+     (rCons . esc . rNil) <>
+     (rCons . chrs . rNil)
+     ) .
+  lit "\""
+ where
+  chrsEscRec :: StringBoomerang r (QuotedString :- r)
+  chrsEscRec = rCons . chrs . rCons . esc . (chrsEscRec <> rNil)
+
+  escChrsRec :: StringBoomerang r (QuotedString :- r)
+  escChrsRec = rCons . esc . rCons . chrs . (escChrsRec <> rNil)
+
+  chrs :: StringBoomerang r (QuotedStringPart :- r)
+  chrs =
+    xmaph Literal fromLiteral (rList1 (noneOf "\\\""))
+   where
+    fromLiteral qsp =
+      case qsp of
+        Literal s -> Just s
+        otherwise -> Nothing
+
+  esc :: StringBoomerang r (QuotedStringPart :- r)
+  esc =
+    xmaph Escaped fromEscaped (rList1 (lit "\\" . anyChar))
+   where
+    fromEscaped qsp =
+      case qsp of
+        Escaped s -> Just s
+        otherwise -> Nothing
+
+escape :: StringBoomerang (QuotedString :- r) (String :- r)
+escape = xpure (arg (:-) u) q
+ where
+  u = concatMap u'
+  u' (Escaped s) = s
+  u' (Literal s) = s
+
+  q (s :- r)  = Just (q' s :- r)
+  q' []       = []
+  q' ('\\':r) = qCons (Escaped "\\") (q' r)
+  q' ('"':r)  = qCons (Escaped "\"") (q' r)
+  q' (c:r)    = qCons (Literal [c]) (q' r)
+
+  qCons :: QuotedStringPart -> QuotedString -> QuotedString
+  qCons (Literal [c]) (Literal t : s) = Literal (c:t) : s
+  qCons (Literal h) (Literal t : s) = Literal (h ++ t) : s
+  qCons (Escaped [c]) (Escaped t : s) = Escaped (c:t) : s
+  qCons (Escaped h) (Escaped t : s) = Escaped (h ++ t) : s
+  qCons e s = e : s
+
+quotedString = escape . quotedString'
 
 parseString :: Prs StringError String () (r :- ())
              -> String
