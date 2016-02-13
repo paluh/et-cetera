@@ -17,7 +17,8 @@ import           Control.Lens (DefName(..), Lens', lensField, lensRules, makeLen
 import           Data.Char (toLower, toUpper)
 import           Data.Monoid ((<>))
 import           Generics.Deriving.Base (Generic)
-import           Generics.Deriving.Monoid
+import           Generics.Deriving.Monoid (gmappend, gmempty, GMonoid)
+import           Generics.Deriving.Show (gshow, GShow)
 import           Language.Haskell.TH (mkName, Name, nameBase)
 import           Prelude hiding ((.), id)
 import           Text.Boomerang.Combinators (manyl, manyr, opt, push, rCons, rList, rList1, rListSep, rNil, somel, somer)
@@ -33,22 +34,71 @@ import           System.EtCetera.Internal.Utils (capitalize)
 type IP = String
 type Port = Int
 
--- 1k => 1000 bytes
--- 1kb => 1024 bytes
--- 1m => 1000000 bytes
--- 1mb => 1024*1024 bytes
--- 1g => 1000000000 bytes
--- 1gb => 1024*1024*1024 bytes
 data SizeUnit =
-    Kibibytes | Mebibytes | Gibibytes -- 2^10, 2^20, 2^30
-  | Kilobytes | Megabytes | Gigabytes -- 10^3, 10^6, 10^9
-  deriving (Eq, Show)
+    K  | M | G
+  | Kb | Mb | Gb
+  deriving (Eq, Read, Show)
 
 data Size = Size Int SizeUnit
   deriving (Eq, Show)
 
--- these types Show and Read instances are crucial for
--- correct parsing
+sizeBmg :: StringBoomerang r (Size :- r)
+sizeBmg =
+  xpure (arg (arg (:-)) (\i u -> Size i (read . capitalize $ u)))
+        (\(Size i u :- r) -> Just (i :- (map toLower . show $ u) :- r))
+  . int
+  . (word "k" <> word "m" <> word "g"
+     <> word "kb" <> word "mb" <> word "gb")
+
+data RenameCommand =
+    RenameCommand String String
+  | DisableCommand String
+  deriving (Eq, Show)
+
+renameCommandBmg :: StringBoomerang r (RenameCommand :- r)
+renameCommandBmg =
+   c . string . somel whiteSpace . string
+ where
+  c =
+    xpure
+      (arg (arg (:-)) (\c n ->
+                        if n == "\"\""
+                          then DisableCommand c
+                          else RenameCommand c n))
+      (\case
+        (DisableCommand c :- r) -> Just (c :- "\"\"" :- r)
+        (RenameCommand o n :- r)   -> Just (o :- n :- r))
+
+data MemoryPolicy =
+    VolatileLru
+  | AllkeysLru
+  | VolatileRandom
+  | AllkeysRandom
+  | VolatileTtl
+  | Noeviction
+  deriving (Eq, Show)
+
+memoryPolicyBmg :: StringBoomerang r (MemoryPolicy :- r)
+memoryPolicyBmg =
+  xpure (arg (:-) p)
+        (\(mp :- r) -> (Just (s mp :- r)))
+  . (word "volatile-lru" <> word "allkeys-lru"
+     <> word "volatile-random" <> word "allkeys-random"
+     <> word "volatile-ttl" <> word "noeviction")
+ where
+  p "volatile-lru"    = VolatileLru
+  p "allkeys-lru"     = AllkeysLru
+  p "volatile-random" = VolatileRandom
+  p "allkeys-random"  = AllkeysRandom
+  p "volatile-ttl"    = VolatileTtl
+  p "noeviction"      = Noeviction
+
+  s VolatileLru    = "volatile-lru"
+  s AllkeysLru     = "allkeys-lru"
+  s VolatileRandom = "volatile-random"
+  s AllkeysRandom  = "allkeys-random"
+  s VolatileTtl    = "volatile-ttl"
+  s Noeviction     = "noeviction"
 
 data LogLevel = Debug | Verbose | Notice | Warning
   deriving (Eq, Read, Show)
@@ -89,6 +139,24 @@ saveBmg =
       . int . somel whiteSpace . int
   sr = push SaveReset . lit "\"\""
 
+string :: StringBoomerang r (String :- r)
+string = rList1 (noneOf "\n \t")
+
+slaveOfBmg :: StringBoomerang r ((IP, Port) :- r)
+slaveOfBmg =
+  xpure (arg (arg (:-)) (\ip port -> (ip, port)))
+        (\((ip, port) :- r) -> Just (ip :- port :- r))
+  . string . somel whiteSpace . int
+
+data AppendFsync = Always | No | Everysec
+  deriving (Eq, Read, Show)
+
+appendFsyncBmg :: StringBoomerang r (AppendFsync :- r)
+appendFsyncBmg =
+  xpure (arg (:-) (read . capitalize))
+      (Just . arg (:-) (map toLower . show))
+  . (word "always" <> word  "no" <> word  "everysec")
+
 data RedisConfig =
   RedisConfig
     {
@@ -128,11 +196,24 @@ data RedisConfig =
     , replBacklogTtl :: Optional Int
     , slavePriority :: Optional Int
     , minSlavesToWrite :: Optional Int
-    , maxSlavesMaxLag :: Optional Int
+    , minSlavesMaxLag :: Optional Int
     , requirePass :: Optional String
-    -- , renameCommand :: [Maybe String String]
-    -- , maxClients :: Maybe Int
-    -- , maxMemory :: Maybe Int
+    , renameCommand :: [RenameCommand]
+    , maxClients :: Optional Int
+    , maxMemory :: Optional Int
+    , maxMemoryPolicy :: Optional MemoryPolicy
+    , maxMemorySamples :: Optional Int
+    , appendOnly :: Optional Bool
+    , appendFilename :: Optional String
+    , appendFsync :: Optional AppendFsync
+    , noAppendFsyncOnRewrite :: Optional Bool
+    , autoAofRewritePercentage :: Optional Int
+    , autoAofRewriteMinSize :: Optional Size
+    , aofLoadTruncated :: Optional Bool
+    , luaTimeLimit :: Optional Int
+    , slowlogLogSlowerThan :: Optional Int
+    , slowlogMaxLen :: Optional Int
+    , latencyMonitorThreshold :: Optional Int
     }
   deriving (Eq, Generic, Show)
 
@@ -155,9 +236,6 @@ data SerializtionError = SerializtionError
 
 optionBoomerang label valueBoomerang =
   lit label . somel whiteSpace . valueBoomerang
-
-string :: StringBoomerang r (String :- r)
-string = rList1 (noneOf "\n \t")
 
 strings :: StringBoomerang r ([String] :- r)
 strings =
@@ -190,30 +268,44 @@ bool = xpure (arg (:-) (\case
   scalar syslogIdentLens (optionBoomerang "syslog-ident" string) .
   scalar syslogFacilityLens (optionBoomerang "syslog-facility" syslogFacilityBmg) .
   scalar databasesLens (optionBoomerang "databases" int) .
-  repeatableScalar saveLens (optionBoomerang "save" saveBmg) -- .
-  --  scalar stopWritesOnBgsaveErrorLens (optionBoomerang "stopWritesOnBgsaveError" Bool) .
-  --  scalar rdbCompressionLens (optionBoomerang "rdbCompression" Bool) .
-  --  scalar rdbChecksumLens (optionBoomerang "rdbChecksum" Bool) .
-  --  scalar dbFilenameLens (optionBoomerang "dbFilename" FilePath) .
-  --  scalar dirLens (optionBoomerang "dir" FilePath) .
-  --  scalar slaveOfLens (optionBoomerang "slaveOf" (IP, Port)) .
-  --  scalar masterAuthLens (optionBoomerang "masterAuth" String) .
-  --  scalar slaveServeStaleDataLens (optionBoomerang "slaveServeStaleData" Bool) .
-  --  scalar slaveReadOnlyLens (optionBoomerang "slaveReadOnly" Bool) .
-  --  scalar replDisklessSyncLens (optionBoomerang "replDisklessSync" Bool) .
-  --  scalar replDisklessSyncDelayLens (optionBoomerang "replDisklessSyncDelay" Int) .
-  --  scalar replPingSlavePeriodLens (optionBoomerang "replPingSlavePeriod" Int) .
-  --  scalar replTimeoutLens (optionBoomerang "replTimeout" Int) .
-  --  scalar replDisableTcpNoDelayLens (optionBoomerang "replDisableTcpNoDelay" Bool) .
-  --  scalar replBacklogSizeLens (optionBoomerang "replBacklogSize" Size) .
-  --  scalar replBacklogTtlLens (optionBoomerang "replBacklogTtl" Int) .
-  --  scalar slavePriorityLens (optionBoomerang "slavePriority" Int) .
-  --  scalar minSlavesToWriteLens (optionBoomerang "minSlavesToWrite" Int) .
-  --  scalar maxSlavesMaxLagLens (optionBoomerang "maxSlavesMaxLag" Int) .
-  --  scalar requirePassLens (optionBoomerang "requirePass" String) .
-  --  , renameCommand :: [Maybe String String]
-  --  scalar maxClientsLens (optionBoomerang "maxClients" Int) .
-  --  scalar maxMemoryLens (optionBoomerang "maxMemory" Int) .
+  repeatableScalar saveLens (optionBoomerang "save" saveBmg) .
+  scalar stopWritesOnBgsaveErrorLens
+    (optionBoomerang "stop-writes-on-bg-save-error" bool) .
+  scalar rdbCompressionLens (optionBoomerang "rdbcompression" bool) .
+  scalar rdbChecksumLens (optionBoomerang "rdbchecksum" bool) .
+  scalar dbFilenameLens (optionBoomerang "dbfilename" string) .
+  scalar dirLens (optionBoomerang "dir" string) .
+  scalar slaveOfLens (optionBoomerang "slaveof" slaveOfBmg) .
+  scalar masterAuthLens (optionBoomerang "masterauth" string) .
+  scalar slaveServeStaleDataLens (optionBoomerang "slave-serve-stale-data" bool) .
+  scalar slaveReadOnlyLens (optionBoomerang "slave-read-only" bool) .
+  scalar replDisklessSyncLens (optionBoomerang "repl-diskless-sync" bool) .
+  scalar replDisklessSyncDelayLens (optionBoomerang "repl-diskless-sync-delay" int) .
+  scalar replPingSlavePeriodLens (optionBoomerang "repl-ping-slave-period" int) .
+  scalar replTimeoutLens (optionBoomerang "repl-timeout" int) .
+  scalar replDisableTcpNoDelayLens (optionBoomerang "repl-disable-tcp-no-delay" bool) .
+  scalar replBacklogSizeLens (optionBoomerang "repl-backlog-size" sizeBmg) .
+  scalar replBacklogTtlLens (optionBoomerang "repl-backlog-ttl" int) .
+  scalar slavePriorityLens (optionBoomerang "slave-priority" int) .
+  scalar minSlavesToWriteLens (optionBoomerang "min-slaves-to-write" int) .
+  scalar minSlavesMaxLagLens (optionBoomerang "min-slaves-max-lag" int) .
+  scalar requirePassLens (optionBoomerang "requirepass" string) .
+  repeatableScalar renameCommandLens (optionBoomerang "rename-command" renameCommandBmg) .
+  scalar maxClientsLens (optionBoomerang "maxclients" int) .
+  scalar maxMemoryLens (optionBoomerang "maxmemory" int) .
+  scalar maxMemoryPolicyLens (optionBoomerang "maxmemory-policy" memoryPolicyBmg) .
+  scalar maxMemorySamplesLens (optionBoomerang "maxmemory-samples" int) .
+  scalar appendOnlyLens (optionBoomerang "appendonly" bool) .
+  scalar appendFilenameLens (optionBoomerang "appendfilename" string) .
+  scalar appendFsyncLens (optionBoomerang "appendfsync" appendFsyncBmg) .
+  scalar noAppendFsyncOnRewriteLens (optionBoomerang "no-appendfsync-on-rewrite" bool) .
+  scalar autoAofRewritePercentageLens (optionBoomerang "auto-aof-rewrite-percentage" int) .
+  scalar autoAofRewriteMinSizeLens (optionBoomerang "auto-aof-rewrite-min-size" sizeBmg) .
+  scalar aofLoadTruncatedLens (optionBoomerang "aof-load-truncated" bool) .
+  scalar luaTimeLimitLens (optionBoomerang "lua-time-limit" int) .
+  scalar slowlogLogSlowerThanLens (optionBoomerang "slowlog-log-slower-than" int) .
+  scalar slowlogMaxLenLens (optionBoomerang "slowlog-max-len" int) .
+  scalar latencyMonitorThresholdLens (optionBoomerang "latency-monitor-threshold" int)
   $ (mempty, id)
 
 parser =

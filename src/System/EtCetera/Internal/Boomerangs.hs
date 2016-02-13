@@ -47,10 +47,13 @@ ignoreWhen p = Boomerang
 eol :: StringBoomerang r r
 eol = lit "\n"
 
+-- quite exensive but correct string quotation
+-- probably can be written in three lines...
+-- maybe some day... ;-)
+
 data QuotedStringPart = Escaped String | Literal String
   deriving (Eq, Show)
 type QuotedString = [QuotedStringPart]
-
 
 quotedString' :: StringBoomerang r (QuotedString :- r)
 quotedString' =

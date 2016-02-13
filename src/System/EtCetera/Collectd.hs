@@ -185,7 +185,7 @@ unquotedString =
   serializer _                    = Nothing
 
 string =
-  -- XXX: test whether this is serialized correctly
+  -- XXX: test whether this serializes correctly
   unquotedString <> u . quotedString
  where
   u = xpure (arg (:-) StringValue) serializer
