@@ -15,6 +15,7 @@ import           Control.Error (note)
 import           Control.Lens (DefName(..), Lens', lensField, lensRules, makeLensesWith, over, set,
                                view, (&), (.~), (??))
 import           Data.Char (toLower, toUpper)
+import           Data.List (foldl')
 import           Data.Monoid ((<>))
 import           Generics.Deriving.Base (Generic)
 import           Generics.Deriving.Monoid (gmappend, gmempty, GMonoid)
@@ -44,11 +45,10 @@ data Size = Size Int SizeUnit
 
 sizeBmg :: StringBoomerang r (Size :- r)
 sizeBmg =
-  xpure (arg (arg (:-)) (\i u -> Size i (read . capitalize $ u)))
-        (\(Size i u :- r) -> Just (i :- (map toLower . show $ u) :- r))
+  xpure (arg (arg (:-)) Size)
+        (\(Size i u :- r) -> Just (i :- u :- r))
   . int
-  . (word "k" <> word "m" <> word "g"
-     <> word "kb" <> word "mb" <> word "gb")
+  . simpleSumBmg ["k", "m", "g", "kb", "mb", "gb"]
 
 data RenameCommand =
     RenameCommand String String
@@ -103,12 +103,14 @@ memoryPolicyBmg =
 data LogLevel = Debug | Verbose | Notice | Warning
   deriving (Eq, Read, Show)
 
-logLevelBmg :: StringBoomerang r (LogLevel :- r)
-logLevelBmg =
+simpleSumBmg :: (Show a, Read a) => [String] -> StringBoomerang r (a :- r)
+simpleSumBmg labels =
     xpure (arg (:-) (read . capitalize))
         (Just . arg (:-) (map toLower . show))
-    . (word "debug" <> word  "verbose"
-       <> word  "notice" <> word  "warning")
+    . (foldl' (<>) mempty . map word $ labels)
+
+logLevelBmg :: StringBoomerang r (LogLevel :- r)
+logLevelBmg = simpleSumBmg ["debug", "verbose", "notice", "warning"]
 
 data SyslogFacility =
     User | Local0 | Local1
@@ -118,13 +120,8 @@ data SyslogFacility =
 
 syslogFacilityBmg :: StringBoomerang r (SyslogFacility :- r)
 syslogFacilityBmg =
-  xpure (arg (:-) (read . capitalize))
-      (Just . arg (:-) (map toLower . show))
-  . (word "user" <> word  "local0"
-     <> word  "local1" <> word  "local2"
-     <> word  "local3" <> word  "local4"
-     <> word  "local5" <> word  "local6"
-     <> word  "local7")
+  simpleSumBmg [ "user", "local0", "local1", "local2", "local3"
+               , "local4", "local5", "local6" ,   "local7"]
 
 data Save = Save Int Int | SaveReset
   deriving (Eq, Show)
@@ -152,10 +149,7 @@ data AppendFsync = Always | No | Everysec
   deriving (Eq, Read, Show)
 
 appendFsyncBmg :: StringBoomerang r (AppendFsync :- r)
-appendFsyncBmg =
-  xpure (arg (:-) (read . capitalize))
-      (Just . arg (:-) (map toLower . show))
-  . (word "always" <> word  "no" <> word  "everysec")
+appendFsyncBmg = simpleSumBmg ["always", "no", "everysec"]
 
 data RedisConfig =
   RedisConfig
