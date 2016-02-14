@@ -4,7 +4,7 @@ Experimental parsers/serializers for some *nix system and services configuration
 
 Really early stage...
 
-## Working
+## Finished
 
 * Redis (v 2.8)
 
