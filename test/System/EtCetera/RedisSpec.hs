@@ -1,12 +1,16 @@
 module System.EtCetera.RedisSpec where
 
 import           Data.Either (isLeft)
+import           Data.Set (fromList)
 import           System.EtCetera.Internal (Optional(..))
-import           System.EtCetera.Redis.V2_8 (bind, daemonize, emptyConfig, parse,
-                                             include, RenameCommand(..),
-                                             renameCommand, replBacklogSize,
-                                             save, Save(..), serialize,
-                                             Size(..), SizeUnit(..))
+import           System.EtCetera.Redis.V2_8 (bind, clientOutputBufferLimitNormal,
+                                             clientOutputBufferLimitSlave,
+                                             clientOutputBufferLimitPubSub,
+                                             ClientOutputBufferLimitSize(..), daemonize, emptyConfig,
+                                             parse, include, KeyspaceEvn(..), KeyspaceEvnType(..),
+                                             notifyKeyspaceEvents, RenameCommand(..), renameCommand,
+                                             replBacklogSize, save, Save(..), serialize, Size(..),
+                                             SizeUnit(..))
 import           Test.Hspec (describe, it, shouldBe, shouldSatisfy, Spec)
 import           Text.Boomerang.Error (ParserError(..))
 
@@ -44,6 +48,43 @@ suite = do
       parse "rename-command KEY K\nrename-command CONFIG \"\"" `shouldBe`
         Right (emptyConfig {renameCommand = [ RenameCommand "KEY" "K"
                                             , DisableCommand "CONFIG"]})
+    it "parses nonempty keyspace notification events configuration" $
+      parse "notify-keyspace-events KE$g" `shouldBe`
+        Right (emptyConfig {notifyKeyspaceEvents =
+                              Present $
+                                SetKespaceEvns $
+                                  fromList [ KeyspaceEvns
+                                           , KeyeventEvns
+                                           , StringCmds
+                                           , GenericCmds
+                                           ]})
+    it "parses keyspace notification events configuration with alias" $
+      parse "notify-keyspace-events KA" `shouldBe`
+        Right (emptyConfig {notifyKeyspaceEvents =
+                              Present $
+                                SetKespaceEvns $
+                                  fromList [ KeyspaceEvns
+                                           , GenericCmds
+                                           , StringCmds
+                                           , ListCmds
+                                           , SetCmds
+                                           , HashCmds
+                                           , SortedSetCmds
+                                           , ExpiredEvns
+                                           , EvictedEvns
+                                           ]})
+    it "parses output buffer limits correctly" $
+      (parse . unlines $ [ "client-output-buffer-limit pubsub 10k 20kb 20"
+                         , "client-output-buffer-limit slave 10g 20gb 20"
+                         , "client-output-buffer-limit normal 10m 20mb 20"
+                         ]) `shouldBe`
+      Right (emptyConfig { clientOutputBufferLimitNormal =
+                            Present (ClientOutputBufferLimitSize (Size 10 M) (Size 20 Mb) 20)
+                         , clientOutputBufferLimitSlave =
+                            Present (ClientOutputBufferLimitSize (Size 10 G) (Size 20 Gb) 20)
+                         , clientOutputBufferLimitPubSub =
+                            Present (ClientOutputBufferLimitSize (Size 10 K) (Size 20 Kb) 20)
+                         })
   describe "System.EtCetera.Redis serialize" $ do
     it "serializes full config" $
       serialize (emptyConfig { include = [ "/usr/share/redis/redis-common.conf"
@@ -55,7 +96,7 @@ suite = do
                            , "include /usr/share/redis/redis-common.conf"
                            , "include /var/lib/redis/custom.conf"
                            ])
-    it "serializes non empty bind" $
+    it "serializes nonempty bind" $
       serialize (emptyConfig { include = [ "/usr/share/redis/redis-common.conf"
                                          , "/var/lib/redis/custom.conf"]
                              , daemonize = Present True
@@ -65,4 +106,36 @@ suite = do
                            , "daemonize yes"
                            , "include /usr/share/redis/redis-common.conf"
                            , "include /var/lib/redis/custom.conf"
+                           ])
+    it "serializes nonempty events notification configuration" $
+      serialize (emptyConfig { notifyKeyspaceEvents =
+                                Present $
+                                  SetKespaceEvns $
+                                    fromList [ KeyspaceEvns
+                                             , GenericCmds
+                                             , StringCmds
+                                             , ListCmds
+                                             , SetCmds
+                                             , HashCmds
+                                             , SortedSetCmds
+                                             , ExpiredEvns
+                                             , EvictedEvns
+                                             ]}) `shouldBe`
+        Right "notify-keyspace-events exzhsl$gK\n"
+
+    it "serializes disabled events notification" $
+      serialize (emptyConfig { notifyKeyspaceEvents =
+                                Present DisableKeyspaceEvns}) `shouldBe`
+        Right "notify-keyspace-events \"\"\n"
+    it "serializes clients buffer limits" $
+      serialize (emptyConfig { clientOutputBufferLimitNormal =
+                                Present (ClientOutputBufferLimitSize (Size 10 M) (Size 20 Mb) 20)
+                             , clientOutputBufferLimitSlave =
+                                Present (ClientOutputBufferLimitSize (Size 10 G) (Size 20 Gb) 20)
+                             , clientOutputBufferLimitPubSub =
+                                Present (ClientOutputBufferLimitSize (Size 10 K) (Size 20 Kb) 20)
+                             }) `shouldBe`
+        (Right . unlines $ [ "client-output-buffer-limit pubsub 10k 20kb 20"
+                           , "client-output-buffer-limit slave 10g 20gb 20"
+                           , "client-output-buffer-limit normal 10m 20mb 20"
                            ])
