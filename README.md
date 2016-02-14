@@ -12,7 +12,7 @@ Really early stage...
 
 * Lxc (still buggy multiple network interfaces parsing and lxc.cgroups. handling)
 
-## Still expermienting
+## Still expermiental phase
 
 * Interfaces
 
