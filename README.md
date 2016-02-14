@@ -1,14 +1,18 @@
 # et-cetera
 
-Experimental parsers/serializers for some *nix configuration files.
+Experimental parsers/serializers for some *nix system and services configuration files.
 
 Really early stage...
 
+## Working
+
+* Redis (v 2.8)
+
 ## Under developement
 
-* Lxc (still buggy network parsing and lxc.cgroups. handling)
+* Lxc (still buggy multiple network interfaces parsing and lxc.cgroups. handling)
 
-## Not even working ;-)
+## Still expermienting
 
 * Interfaces
 
