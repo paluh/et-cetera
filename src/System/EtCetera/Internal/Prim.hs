@@ -36,7 +36,7 @@ instance Category (Prs e tok) where
     return (f . g)
 
 data Ser tok a b =
-  Ser (b -> Maybe (tok -> tok, a))
+  Ser { runSer :: (b -> Maybe (tok -> tok, a)) }
 
 instance Monoid (Ser tok a b) where
   mempty = Ser (const mzero)
