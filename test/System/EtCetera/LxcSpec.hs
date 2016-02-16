@@ -28,7 +28,14 @@ suite = do
         Right emptyConfig
     it "parses network type correctly" $
       parse "lxc.network.type = macvlan" `shouldBe`
-        (Right $ emptyConfig { lxcNetworkType = Present Macvlan})
+        (Right $ emptyConfig)
+    it "parses multiple network declarations" $
+      parse (unlines [ "lxc.network.type = macvlan"
+                     , "lxc.network.name = eth0"
+                     , "lxc.network.type = macvlan"
+                     , "lxc.network.name = eth1"
+                     ]) `shouldBe`
+        (Right $ emptyConfig)
     it "parses integer value correctly" $
       parse "lxc.start.delay = 8" `shouldBe`
         (Right $ emptyConfig { lxcStartDelay = Present 8})

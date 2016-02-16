@@ -17,19 +17,21 @@ import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
 import           Data.Maybe (fromJust, fromMaybe, Maybe)
 import           Data.Char (toLower, toUpper)
-import           System.EtCetera.Internal (Optional(..), repeatableScalar, scalar, vector)
+import           System.EtCetera.Internal (extendSerializerWithScalarOption, Optional(..), repeatableScalar, scalar, Serializer, vector)
 import           Generics.Deriving.Base (Generic)
 import           Generics.Deriving.Monoid (gmappend, gmempty, GMonoid)
 import           Language.Haskell.TH (DecsQ, mkName, Name, nameBase)
 import           Prelude hiding ((.), id)
-import           Text.Boomerang.Combinators (manyl, manyr, opt, push, rCons, rList, rList1, rNil)
+import           Text.Boomerang.Combinators (manyl, manyr, opt, push, rCons, rList, rList1, rNil, somel)
 import           Text.Boomerang.Error (ErrorMsg(..), mkParserError)
 import           Text.Boomerang.HStack (arg, hdMap, (:-)(..))
 import           Text.Boomerang.Pos (incMajor, incMinor)
 import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, unparse, xpure)
 import           Text.Boomerang.String (anyChar, char, digit, lit, satisfy,
                                         StringBoomerang, StringError)
-import           System.EtCetera.Internal.Prim (Ser(..), toPrs)
+import           System.EtCetera.Internal (SingleOptionParser)
+import           System.EtCetera.Internal.Prim (Prs(..), purePrs, Ser(..),
+                                                StringPrs, toPrs)
 import           System.EtCetera.Internal.Boomerangs (ignoreWhen, noneOf, oneOf, parseString,
                                                       whiteSpace, word, (<?>))
 
@@ -58,6 +60,18 @@ data Network =
     , lxcNetworkVethPair :: Optional String
     , lxcNetworkVlanId :: Optional String
     }
+  deriving (Eq, Generic, Show)
+
+instance GMonoid Network
+instance Monoid Network where
+  mempty = gmempty
+  mappend = gmappend
+
+emptyNetwork :: Network
+emptyNetwork = mempty
+
+makeLensesWith ?? ''Network $ lensRules
+    & lensField .~ \_ _ name -> [TopName (mkName $ nameBase name ++ "Lens")]
 
 -- options list taken from here:
 -- https://github.com/lxc/lxc/blob/ffe344373e5d2b9f2be517f138bf42f9c7d0ca20/src/lxc/confile.c#L116
@@ -121,7 +135,6 @@ makeLensesWith ?? ''LxcConfig $ lensRules
     & lensField .~ \_ _ name -> [TopName (mkName $ nameBase name ++ "Lens")]
 
 instance GMonoid LxcConfig
-
 instance Monoid LxcConfig where
   mempty = gmempty
   mappend = gmappend
@@ -129,7 +142,7 @@ instance Monoid LxcConfig where
 emptyConfig :: LxcConfig
 emptyConfig = mempty
 
-option l vp = lit l . manyl whiteSpace .  lit "=" . manyl whiteSpace . vp
+option l vp = lit l . opt ws .  lit "=" . opt ws . vp
 
 string :: StringBoomerang r (String :- r)
 string = rList1 (noneOf "\n \t")
@@ -146,6 +159,7 @@ int =
           (Just . arg (:-) show)
   . rList1 digit
 
+networkType :: forall r. StringBoomerang r (NetworkType :- r)
 networkType =
     xpure (arg (:-) (read . capitalize))
         (Just . arg (:-) (map toLower . show))
@@ -159,7 +173,7 @@ capitalize (c:cs) = toUpper c:cs
 eol :: StringBoomerang r r
 eol = lit "\n"
 
-(anyOptionParser, serializer) =
+(baseOptionsParser, baseOptionsSerializer) =
   scalar lxcAaAllowIncompleteLens (option "lxc.aa_allow_incomplete" string) .
   scalar lxcAaProfileLens (option "lxc.aa_profile" string) .
   scalar lxcArchLens (option "lxc.arch" string) .
@@ -196,21 +210,6 @@ eol = lit "\n"
   scalar lxcMountLens (option "lxc.mount" string) .
   scalar lxcMountAutoLens (option "lxc.mount.auto" string) .
   scalar lxcMountEntryLens (option "lxc.mount.entry" string) .
-  scalar lxcNetworkTypeLens (option "lxc.network.type" networkType) .
-  scalar lxcNetworkFlagsLens (option "lxc.network.flags" string) .
-  scalar lxcNetworkHwaddrLens (option "lxc.network.hwaddr" string) .
-  scalar lxcNetworkIpv4Lens (option "lxc.network.ipv4" string) .
-  scalar lxcNetworkIpv4GatewayLens (option "lxc.network.ipv4.gateway" string) .
-  scalar lxcNetworkIpv6Lens (option "lxc.network.ipv6" string) .
-  scalar lxcNetworkIpv6GatewayLens (option "lxc.network.ipv6.gateway" string) .
-  scalar lxcNetworkLinkLens (option "lxc.network.link" string) .
-  scalar lxcNetworkMacvlanModeLens (option "lxc.network.macvlan.mode" string) .
-  scalar lxcNetworkMtuLens (option "lxc.network.mtu" string) .
-  scalar lxcNetworkNameLens (option "lxc.network.name" string) .
-  scalar lxcNetworkScriptDownLens (option "lxc.network.script.down" string) .
-  scalar lxcNetworkScriptUpLens (option "lxc.network.script.up" string) .
-  scalar lxcNetworkVethPairLens (option "lxc.network.veth.pair" string) .
-  scalar lxcNetworkVlanIdLens (option "lxc.network.vlan.id" string) .
   scalar lxcPivotdirLens (option "lxc.pivotdir" string) .
   scalar lxcPtsLens (option "lxc.pts" int) .
   scalar lxcRebootsignalLens (option "lxc.rebootsignal" string) .
@@ -227,11 +226,75 @@ eol = lit "\n"
   scalar lxcUtsnameLens (option "lxc.utsname" string)
   $ (mempty, id)
 
+ws = somel whiteSpace
+
+(anyOptionParser, networkSerializer) =
+  nScalar lxcNetworkTypeLens (nOption "lxc.network.type" networkType) .
+  nScalar lxcNetworkFlagsLens (nOption "lxc.network.flags" string) .
+  nScalar lxcNetworkHwaddrLens (nOption "lxc.network.hwaddr" string) .
+  nScalar lxcNetworkIpv4Lens (nOption "lxc.network.ipv4" string) .
+  nScalar lxcNetworkIpv4GatewayLens (nOption "lxc.network.ipv4.gateway" string) .
+  nScalar lxcNetworkIpv6Lens (nOption "lxc.network.ipv6" string) .
+  nScalar lxcNetworkIpv6GatewayLens (nOption "lxc.network.ipv6.gateway" string) .
+  nScalar lxcNetworkLinkLens (nOption "lxc.network.link" string) .
+  nScalar lxcNetworkMacvlanModeLens (nOption "lxc.network.macvlan.mode" string) .
+  nScalar lxcNetworkMtuLens (nOption "lxc.network.mtu" string) .
+  nScalar lxcNetworkNameLens (nOption "lxc.network.name" string) .
+  nScalar lxcNetworkScriptDownLens (nOption "lxc.network.script.down" string) .
+  nScalar lxcNetworkScriptUpLens (nOption "lxc.network.script.up" string) .
+  nScalar lxcNetworkVethPairLens (nOption "lxc.network.veth.pair" string) .
+  nScalar lxcNetworkVlanIdLens (nOption "lxc.network.vlan.id" string)
+  $ (baseOptionsParser, id)
+ where
+  nScalar :: Lens' Network (Optional a) ->
+             (forall r. StringBoomerang r (a :- r)) ->
+             (SingleOptionParser LxcConfig, Serializer Network) ->
+             (SingleOptionParser LxcConfig, Serializer Network)
+  nScalar lens ob (prs, ser) =
+    (purePrs (\(value :- lxc :- r) -> over lxcNetworkLens (setValue lens value) lxc :- r) . toPrs ob <> prs,
+     extendSerializerWithScalarOption lens ob ser)
+
+  nOption l b = lit l . opt ws . lit "=" . opt ws . b
+
+  setValue :: Lens' Network (Optional a) -> a -> [Network] -> [Network]
+  -- a little bit cheating here ;-)
+  setValue lens value [] = [set lens (Present value) emptyNetwork]
+  setValue lens value (n:ns) = set lens (Present value) n : ns
+
+pureSer :: (b -> Maybe a) -> Ser String a b
+pureSer f =
+  Ser (fmap ((,) id) <$> f)
+
+-- instance (Ser) Category where
+--   (Ser f) . (Ser g) =
+--     Ser (\a -> do
+--       (t2t, b) <- g a
+--       (t2t', c) <- f b
+--       return (t2t' . t2t, c)
+pop :: Ser String r (a :- r)
+pop = pureSer (\(a :- r) -> Just r)
+
+networks :: Ser String (LxcConfig :- r) (LxcConfig :- r)
+networks =
+  -- networksSer . (pureSer p)
+  undefined
+ where
+  p (lxcConfig@(LxcConfig{lxcNetwork=ns}) :- r) = Just (id, ns :- lxcConfig :- r)
+  s = Ser p
+  networksSer =
+    Ser (l (networkSerializer . pop))
+   where
+    l (Ser s) ([] :- r) = Just (id, r)
+    l (Ser s) ((x:xs) :- r) = do
+      (t2t, r') <- s (x :- r)
+      (t2t', r'') <- l (Ser s) (xs :- r')
+      return (t2t' . t2t, r'')
+
 parser =
   -- comment
   ((toPrs (lit "#" . manyr (ignoreWhen (/= '\n')))
   -- only white characters line
-   <> toPrs whiteSpace
+   <> toPrs ws
   -- option
    <> anyOptionParser <?>
       (\t -> "can't parse any option from this line: " ++ takeWhile (/= '\n') t))
@@ -261,4 +324,4 @@ serialize :: LxcConfig -> Either SerializtionError String
 serialize redisConfig =
   note SerializtionError . fmap (($ "") . fst) . s $ (redisConfig :- ())
  where
-  Ser s = serializer
+  Ser s = baseOptionsSerializer

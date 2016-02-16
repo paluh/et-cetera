@@ -13,6 +13,7 @@ import           Prelude hiding (id, (.))
 import           Text.Boomerang.HStack ((:-)(..))
 import           Text.Boomerang.Prim (bestErrors, Boomerang(..), Parser(..), prs, runParser, ser)
 import qualified Text.Boomerang.Prim
+import           Text.Boomerang.String (StringError)
 import           Text.Boomerang.Pos (ErrorPosition, initialPos, InitialPosition, Pos)
 
 -- | Sometimes it is mutch easier to separately work
@@ -69,3 +70,9 @@ parse1 isComplete r =
     (Boomerang
       (runPrs r)
       (error "Text.Boomerang.EtCetera.Prim.parse1: Boomerang.Prim.parse1 evaluated serializer"))
+
+type StringPrs a b= Prs StringError String a b
+
+purePrs :: (a -> b) -> Prs e tok a b
+purePrs f = Prs (return f)
+
