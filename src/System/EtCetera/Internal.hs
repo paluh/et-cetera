@@ -60,7 +60,7 @@ extendSerializerWithScalarOption :: Lens' config (Optional a) ->
                                     Serializer config r ->
                                     Serializer config r
 extendSerializerWithScalarOption optionLens optionBoomerang serializer =
-  serializer . valueExtractor . optionSerializer <> serializer
+  valueExtractor . optionSerializer . serializer <> serializer
  where
   optionSerializer = toSer (optionBoomerang . eol)
   valueExtractor =

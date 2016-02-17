@@ -7,8 +7,6 @@ import qualified System.EtCetera.LxcSpec as LxcSpec
 import qualified System.EtCetera.RedisSpec as RedisSpec
 import           Test.Hspec (hspec)
 
--- main = hspec RedisSpec.suite
--- (do InterfacesSpec.suite; CollectdSpec.suite; )
 main :: IO ()
 main = hspec $ do
   InternalSpec.suite

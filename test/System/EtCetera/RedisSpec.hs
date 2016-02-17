@@ -74,9 +74,9 @@ suite = do
                                            , EvictedEvns
                                            ]})
     it "parses output buffer limits correctly" $
-      (parse . unlines $ [ "client-output-buffer-limit pubsub 10k 20kb 20"
+      (parse . unlines $ [ "client-output-buffer-limit normal 10m 20mb 20"
                          , "client-output-buffer-limit slave 10g 20gb 20"
-                         , "client-output-buffer-limit normal 10m 20mb 20"
+                         , "client-output-buffer-limit pubsub 10k 20kb 20"
                          ]) `shouldBe`
       Right (emptyConfig { clientOutputBufferLimitNormal =
                             Present (ClientOutputBufferLimitSize (Size 10 M) (Size 20 Mb) 20)
@@ -102,8 +102,8 @@ suite = do
                              , daemonize = Present True
                              , bind = ["127.0.0.1", "192.168.1.1"]
                              }) `shouldBe`
-        (Right . unlines $ [ "bind 127.0.0.1 192.168.1.1"
-                           , "daemonize yes"
+        (Right . unlines $ [ "daemonize yes"
+                           , "bind 127.0.0.1 192.168.1.1"
                            , "include /usr/share/redis/redis-common.conf"
                            , "include /var/lib/redis/custom.conf"
                            ])
@@ -128,14 +128,14 @@ suite = do
                                 Present DisableKeyspaceEvns}) `shouldBe`
         Right "notify-keyspace-events \"\"\n"
     it "serializes clients buffer limits" $
-      serialize (emptyConfig { clientOutputBufferLimitNormal =
-                                Present (ClientOutputBufferLimitSize (Size 10 M) (Size 20 Mb) 20)
-                             , clientOutputBufferLimitSlave =
+      serialize (emptyConfig { clientOutputBufferLimitSlave =
                                 Present (ClientOutputBufferLimitSize (Size 10 G) (Size 20 Gb) 20)
+                             , clientOutputBufferLimitNormal =
+                                Present (ClientOutputBufferLimitSize (Size 10 M) (Size 20 Mb) 20)
                              , clientOutputBufferLimitPubSub =
                                 Present (ClientOutputBufferLimitSize (Size 10 K) (Size 20 Kb) 20)
                              }) `shouldBe`
-        (Right . unlines $ [ "client-output-buffer-limit pubsub 10k 20kb 20"
+        (Right . unlines $ [ "client-output-buffer-limit normal 10m 20mb 20"
                            , "client-output-buffer-limit slave 10g 20gb 20"
-                           , "client-output-buffer-limit normal 10m 20mb 20"
-                           ])
+                           , "client-output-buffer-limit pubsub 10k 20kb 20"
+                           ]) 

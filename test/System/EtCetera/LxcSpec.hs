@@ -10,7 +10,8 @@ import           System.EtCetera.Lxc.Internal (emptyConfig, emptyNetwork, LxcCon
                                                NetworkType(..), parse, serialize,
                                                SerializtionError(..), Switch(..),
                                                lxcAaProfile, lxcInclude,
-                                               lxcNetwork, lxcNetworkType, lxcRootfs,
+                                               lxcNetwork, lxcNetworkName,
+                                               lxcNetworkType, lxcRootfs,
                                                lxcStartDelay)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -28,20 +29,23 @@ suite = do
         Right emptyConfig
     it "parses network type correctly" $
       parse "lxc.network.type = macvlan" `shouldBe`
-        (Right $ emptyConfig)
+        (Right $ emptyConfig { lxcNetwork = [emptyNetwork { lxcNetworkType = Present Macvlan } ] })
     it "parses multiple network declarations" $
       parse (unlines [ "lxc.network.type = macvlan"
                      , "lxc.network.name = eth0"
-                     , "lxc.network.type = macvlan"
+                     , "lxc.network.type = veth"
                      , "lxc.network.name = eth1"
                      ]) `shouldBe`
-        (Right $ emptyConfig)
+        (Right $ emptyConfig { lxcNetwork = [ emptyNetwork { lxcNetworkType = Present Macvlan
+                                                           , lxcNetworkName = Present "eth0"}
+                                            , emptyNetwork { lxcNetworkType = Present Veth
+                                                           , lxcNetworkName = Present "eth1"}] } )
     it "parses integer value correctly" $
       parse "lxc.start.delay = 8" `shouldBe`
         (Right $ emptyConfig { lxcStartDelay = Present 8})
     it "parses multiple options" $
-      parse (unlines [ "lxc.include=/var/lib/lxc/lxc-common.conf"
-                     , "lxc.aa_profile=/mnt/rootfs.complex"
+      parse (unlines [ "lxc.aa_profile=/mnt/rootfs.complex"
+                     , "lxc.include=/var/lib/lxc/lxc-common.conf"
                      , "lxc.include=/var/lib/lxc/custom"
                      ]) `shouldBe`
         Right (emptyConfig { lxcAaProfile = Present "/mnt/rootfs.complex"
@@ -78,15 +82,16 @@ suite = do
                                             , "/var/lib/lxc/custom"]
                              , lxcAaProfile = Present "/mnt/rootfs.complex"
                              }) `shouldBe`
-        (Right . unlines $ [ "lxc.include=/var/lib/lxc/lxc-common.conf"
+        (Right . unlines $ [ "lxc.aa_profile=/mnt/rootfs.complex"
+                           , "lxc.include=/var/lib/lxc/lxc-common.conf"
                            , "lxc.include=/var/lib/lxc/custom"
-                           , "lxc.aa_profile=/mnt/rootfs.complex"
                            ])
 
     it "serializes multiple correct networks" $
       serialize
         (emptyConfig
            { lxcNetwork = [ emptyNetwork { lxcNetworkType = Present Macvlan }
-                          , emptyNetwork { lxcNetworkType = Present Veth }]
+                          , emptyNetwork { lxcNetworkType = Present Veth
+                                         , lxcNetworkName = Present "eth0" }]
            }) `shouldBe`
-        (Right "lxc.network.type=veth\nlxc.network.type=macvlan\n")
+        Right "lxc.network.type=macvlan\nlxc.network.type=veth\nlxc.network.name=eth0\n"

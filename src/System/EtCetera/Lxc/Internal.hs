@@ -6,18 +6,19 @@
 {-# LANGUAGE TemplateHaskell #-}
 module System.EtCetera.Lxc.Internal where
 
+import           Debug.Trace (trace)
 import           Control.Arrow (first)
 import           Control.Category ((.), id)
 import           Control.Error (note)
 import           Control.Lens (DefName(..), Lens', lensField, lensRules, makeLensesWith,
                                over, set, view, (&), (.~), (??))
+import           Control.Monad (mplus)
 import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List (foldl')
 import           Data.Monoid (mempty, (<>))
 import           Data.Maybe (fromJust, fromMaybe, Maybe)
 import           Data.Char (toLower, toUpper)
-import           System.EtCetera.Internal (extendSerializerWithScalarOption, Optional(..), repeatableScalar, scalar, Serializer, vector)
 import           Generics.Deriving.Base (Generic)
 import           Generics.Deriving.Monoid (gmappend, gmempty, GMonoid)
 import           Language.Haskell.TH (DecsQ, mkName, Name, nameBase)
@@ -29,9 +30,9 @@ import           Text.Boomerang.Pos (incMajor, incMinor)
 import           Text.Boomerang.Prim (Boomerang(..), Parser(..), prs, ser, unparse, xpure)
 import           Text.Boomerang.String (anyChar, char, digit, lit, satisfy,
                                         StringBoomerang, StringError)
-import           System.EtCetera.Internal (SingleOptionParser)
+import           System.EtCetera.Internal (extendSerializerWithScalarOption, Optional(..), repeatableScalar, scalar, Serializer, SingleOptionParser, vector)
 import           System.EtCetera.Internal.Prim (Prs(..), purePrs, Ser(..),
-                                                StringPrs, toPrs)
+                                                StringPrs, toPrs, toSer)
 import           System.EtCetera.Internal.Boomerangs (ignoreWhen, noneOf, oneOf, parseString,
                                                       whiteSpace, word, (<?>))
 
@@ -154,12 +155,14 @@ switch = xpure (arg (:-) (\case
                   (On :- r)  -> Just ('1' :- r)
                   (Off :- r) -> Just ('0' :- r))
        . oneOf "01"
+
+int :: StringBoomerang r (Int :- r)
 int =
     xpure (arg (:-) read)
           (Just . arg (:-) show)
   . rList1 digit
 
-networkType :: forall r. StringBoomerang r (NetworkType :- r)
+networkType :: StringBoomerang r (NetworkType :- r)
 networkType =
     xpure (arg (:-) (read . capitalize))
         (Just . arg (:-) (map toLower . show))
@@ -229,7 +232,7 @@ eol = lit "\n"
 ws = somel whiteSpace
 
 (anyOptionParser, networkSerializer) =
-  nScalar lxcNetworkTypeLens (nOption "lxc.network.type" networkType) .
+  networkTypePrsSer .
   nScalar lxcNetworkFlagsLens (nOption "lxc.network.flags" string) .
   nScalar lxcNetworkHwaddrLens (nOption "lxc.network.hwaddr" string) .
   nScalar lxcNetworkIpv4Lens (nOption "lxc.network.ipv4" string) .
@@ -254,33 +257,60 @@ ws = somel whiteSpace
     (purePrs (\(value :- lxc :- r) -> over lxcNetworkLens (setValue lens value) lxc :- r) . toPrs ob <> prs,
      extendSerializerWithScalarOption lens ob ser)
 
+  -- we are agregating values from left to right
+  setValue lens value (n@Network{ lxcNetworkType = Missing }:ns) = set lens (Present value) n : ns
+  setValue lens value ns = set lens (Present value) emptyNetwork : ns
+
   nOption l b = lit l . opt ws . lit "=" . opt ws . b
 
-  setValue lens value [] = [set lens (Present value) emptyNetwork]
-  setValue lens value (n:ns) = set lens (Present value) n : ns
+  networkTypePrsSer :: (SingleOptionParser LxcConfig r, Serializer Network r) ->
+                       (SingleOptionParser LxcConfig r, Serializer Network r)
+  networkTypePrsSer (prs, ser) =
+    (purePrs (\(value :- lxc :- r) -> over lxcNetworkLens (sv value) lxc :- r) . toPrs ob <> prs,
+     extendSerializerWithScalarOption lens ob ser)
+   where
+    lens :: Lens' Network (Optional NetworkType)
+    lens = lxcNetworkTypeLens
 
-pureSer :: (b -> Maybe a) -> Ser String a b
+    ob :: forall r. StringBoomerang r (NetworkType :- r)
+    ob = nOption "lxc.network.type" networkType
+
+    sv value [] = [set lens (Present value) emptyNetwork]
+    sv value (n:ns) = set lens (Present value) n : ns
+
+pureSer :: (b -> Maybe a) -> Ser t a b
 pureSer f =
   Ser (fmap ((,) id) <$> f)
 
--- instance (Ser) Category where
---   (Ser f) . (Ser g) =
---     Ser (\a -> do
---       (t2t, b) <- g a
---       (t2t', c) <- f b
---       return (t2t' . t2t, c)
 pop :: Ser String r (a :- r)
 pop = pureSer (\(a :- r) -> Just r)
 
-listSer :: Ser tok r (a :- r) -> Ser tok r ([a] :- r)
-listSer s =
-  Ser (listSer' s)
+somelSer (Ser s) =
+  Ser somel
  where
-  listSer' (Ser s) ([] :- r) = Just (id, r)
-  listSer' (Ser s) ((x:xs) :- r) = do
-    (t2t, r') <- s (x :- r)
-    (t2t', r'') <- listSer' (Ser s) (xs :- r')
-    return (t2t' . t2t, r'')
+  somel r = do
+    sr@(f, r') <- s r
+    (f', r'') <- somel r' `mplus` Just (id, r')
+    return (f . f', r'')
+
+manylSer :: Ser t r r -> Ser t r r
+manylSer s = somelSer s <> id
+
+nilSer :: Ser t r ([a] :- r)
+nilSer =
+  pureSer s
+ where
+  s ([] :- r) = Just r
+  s _         = Nothing
+
+consSer :: Ser t (a :- [a] :- r) ([a] :- r)
+consSer =
+  pureSer s
+ where
+  s ([] :- r) = Nothing
+  s ((x:xs) :- r) = return (x :- xs :- r)
+
+listSer r = manylSer (consSer . r) . nilSer
 
 -- XXX: fail when there is missing networkType in any of interaces coniguration
 networksSerializer :: Ser String (LxcConfig :- r) (LxcConfig :- r)
@@ -328,3 +358,112 @@ serialize redisConfig =
   note SerializtionError . fmap (($ "") . fst) . s $ (redisConfig :- ())
  where
   Ser s = serializer
+
+
+-- Right
+--   (LxcConfig
+--      { lxcAaAllowIncomplete = Missing
+--      , lxcAaProfile = Missing
+--      , lxcArch = Missing
+--      , lxcAutodev = Missing
+--      , lxcCapDrop = Missing
+--      , lxcCapKeep = Missing
+--      , lxcCgroup = Missing
+--      , lxcConsole = Missing
+--      , lxcConsoleLogfile = Missing
+--      , lxcDevttydir = Missing
+--      , lxcEnvironment = []
+--      , lxcEphemeral = Missing
+--      , lxcGroup = Missing
+--      , lxcHaltsignal = Missing
+--      , lxcHook = Missing
+--      , lxcHookAutodev = Missing
+--      , lxcHookClone = Missing
+--      , lxcHookDestroy = Missing
+--      , lxcHookMount = Missing
+--      , lxcHookPostStop = Missing
+--      , lxcHookPreMount = Missing
+--      , lxcHookPreStart = Missing
+--      , lxcHookStart = Missing
+--      , lxcHookStop = Missing
+--      , lxcIdMap = Missing
+--      , lxcInclude = []
+--      , lxcInitCmd = Missing
+--      , lxcInitGid = Missing
+--      , lxcInitUid = Missing
+--      , lxcKmsg = Missing
+--      , lxcLogfile = Missing
+--      , lxcLoglevel = Missing
+--      , lxcMonitorUnshare = Missing
+--      , lxcMount = Missing
+--      , lxcMountAuto = Missing
+--      , lxcMountEntry = Missing
+--      , lxcNetwork = [ Network
+--                           { lxcNetworkType = Present Macvlan
+--                           , lxcNetworkFlags = Missing
+--                           , lxcNetworkHwaddr = Missing
+--                           , lxcNetworkIpv4 = Missing
+--                           , lxcNetworkIpv4Gateway = Missing
+--                           , lxcNetworkIpv6 = Missing
+--                           , lxcNetworkIpv6Gateway = Missing
+--                           , lxcNetworkLink = Missing
+--                           , lxcNetworkMacvlanMode = Missing
+--                           , lxcNetworkMtu = Missing
+--                           , lxcNetworkName = Missing
+--                           , lxcNetworkScriptDown = Missing
+--                           , lxcNetworkScriptUp = Missing
+--                           , lxcNetworkVethPair = Missing
+--                           , lxcNetworkVlanId = Missing
+--                           }
+--                     , Network
+--                       { lxcNetworkType = Present Veth
+--                       , lxcNetworkFlags = Missing
+--                       , lxcNetworkHwaddr = Missing
+--                       , lxcNetworkIpv4 = Missing
+--                       , lxcNetworkIpv4Gateway = Missing
+--                       , lxcNetworkIpv6 = Missing
+--                       , lxcNetworkIpv6Gateway = Missing
+--                       , lxcNetworkLink = Missing
+--                       , lxcNetworkMacvlanMode = Missing
+--                       , lxcNetworkMtu = Missing
+--                       , lxcNetworkName = Present "eth0"
+--                       , lxcNetworkScriptDown = Missing
+--                       , lxcNetworkScriptUp = Missing
+--                       , lxcNetworkVethPair = Missing
+--                       , lxcNetworkVlanId = Missing
+--                       }
+--                     , Network
+--                       { lxcNetworkType = Missing
+--                       , lxcNetworkFlags = Missing
+--                       , lxcNetworkHwaddr = Missing
+--                       , lxcNetworkIpv4 = Missing
+--                       , lxcNetworkIpv4Gateway = Missing
+--                       , lxcNetworkIpv6 = Missing
+--                       , lxcNetworkIpv6Gateway = Missing
+--                       , lxcNetworkLink = Missing
+--                       , lxcNetworkMacvlanMode = Missing
+--                       , lxcNetworkMtu = Missing
+--                       , lxcNetworkName = Present "eth1"
+--                       , lxcNetworkScriptDown = Missing
+--                       , lxcNetworkScriptUp = Missing
+--                       , lxcNetworkVethPair = Missing
+--                       , lxcNetworkVlanId = Missing
+--                       }
+--                     ]
+--      , lxcPivotdir = Missing
+--      , lxcPts = Missing
+--      , lxcRebootsignal = Missing
+--      , lxcRootfs = Missing
+--      , lxcRootfsMount = Missing
+--      , lxcRootfsOptions = Missing
+--      , lxcSeConstring = Missing
+--      , lxcSeccomp = Missing
+--      , lxcStartAuto = Missing
+--      , lxcStartDelay = Missing
+--      , lxcStartOrder = Missing
+--      , lxcStopsignal = Missing
+--      , lxcTty = Missing
+--      , lxcUtsname = Missing
+--      })
+-- 
+-- 
