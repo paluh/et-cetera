@@ -6,13 +6,10 @@ module System.EtCetera.LxcSpec where
 import           Control.Monad.Trans (liftIO)
 import           Data.List (intercalate)
 import           System.EtCetera.Internal (Optional(..))
-import           System.EtCetera.Lxc.Internal (emptyConfig, emptyNetwork, LxcConfig,
-                                               NetworkType(..), parse, serialize,
+import           System.EtCetera.Lxc.Internal (Arch(..), emptyConfig, emptyNetwork, LxcConfig,
+                                               Network(..), NetworkType(..), parse, serialize,
                                                SerializtionError(..), Switch(..),
-                                               lxcAaProfile, lxcInclude,
-                                               lxcNetwork, lxcNetworkName,
-                                               lxcNetworkType, lxcRootfs,
-                                               lxcStartDelay)
+                                               LxcConfig(..))
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
 suite :: Spec
@@ -76,6 +73,36 @@ suite = do
                                             , "/var/lib/lxc/custom"]
                              , lxcRootfs = Present "/mnt/rootfs.complex"
                              })
+    it "parsing regression 2016.02.18.1" $
+      parse (intercalate "\n" [ "lxc.arch=x86_64\n"
+                              , "lxc.rootfs=/var/lib/lxc/stream6-clone.nadaje.com/rootfs"
+                              , "lxc.utsname=stream6-clone.nadaje.com"
+                              , "lxc.include=/usr/share/lxc/config/debian.common.conf"
+                              , "lxc.network.type=veth"
+                              , "lxc.network.flags=up"
+                              , "lxc.network.ipv4=10.0.0.3"
+                              , "lxc.network.ipv4.gateway=10.0.0.2"
+                              , "lxc.network.link=lxc-br01"
+                              , "lxc.network.name=eth0"
+                              , "\n"
+                              , "\n"
+                              ]) `shouldBe`
+        (Right
+           emptyConfig
+             { lxcArch = Present X86_64
+             , lxcRootfs = Present "/var/lib/lxc/stream6-clone.nadaje.com/rootfs"
+             , lxcUtsname = Present "stream6-clone.nadaje.com"
+             , lxcInclude = ["/usr/share/lxc/config/debian.common.conf"]
+             , lxcNetwork = [ emptyNetwork
+                              { lxcNetworkType = Present Veth
+                              , lxcNetworkFlags = Present "up"
+                              , lxcNetworkIpv4 = Present "10.0.0.3"
+                              , lxcNetworkIpv4Gateway = Present "10.0.0.2"
+                              , lxcNetworkLink = Present "lxc-br01"
+                              , lxcNetworkName = Present "eth0"
+                              }
+                            ]
+             })
   describe "System.EtCetera.Lxc serialize" $ do
     it "serializes multiple options" $
       serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/lxc-common.conf"

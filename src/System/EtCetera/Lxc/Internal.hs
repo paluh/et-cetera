@@ -34,14 +34,19 @@ import           System.EtCetera.Internal (extendSerializerWithScalarOption, Opt
 import           System.EtCetera.Internal.Prim (Prs(..), purePrs, Ser(..),
                                                 StringPrs, toPrs, toSer)
 import           System.EtCetera.Internal.Boomerangs (ignoreWhen, noneOf, oneOf, parseString,
-                                                      whiteSpace, word, (<?>))
+                                                      simpleSumBmg, whiteSpace, word, (<?>))
+
+data Arch = X86 | I686 | X86_64 | Amd64
+  deriving (Eq, Read, Show)
+
+archBmg :: StringBoomerang r (Arch :- r)
+archBmg = simpleSumBmg ["x86", "i686", "x86_64", "amd64"]
 
 data Switch = On | Off
   deriving (Eq, Show)
 
 data NetworkType = None | Empty | Veth | Vlan | Macvlan | Phys
   deriving (Eq, Read, Show)
-
 
 data Network =
   Network
@@ -80,7 +85,7 @@ data LxcConfig =
   LxcConfig
     { lxcAaAllowIncomplete :: Optional String
     , lxcAaProfile :: Optional String
-    , lxcArch :: Optional String
+    , lxcArch :: Optional Arch
     , lxcAutodev :: Optional Switch
     , lxcCapDrop :: Optional String
     , lxcCapKeep :: Optional String
@@ -179,7 +184,7 @@ eol = lit "\n"
 (baseOptionsParser, baseOptionsSerializer) =
   scalar lxcAaAllowIncompleteLens (option "lxc.aa_allow_incomplete" string) .
   scalar lxcAaProfileLens (option "lxc.aa_profile" string) .
-  scalar lxcArchLens (option "lxc.arch" string) .
+  scalar lxcArchLens (option "lxc.arch" archBmg) .
   scalar lxcAutodevLens (option "lxc.autodev" switch) .
   scalar lxcCapDropLens (option "lxc.cap.drop" string) .
   scalar lxcCapKeepLens (option "lxc.cap.keep" string) .
@@ -340,7 +345,7 @@ parser =
   -- completely empty line (I don't want to handle this
   -- above with `manyl witeSpace` because always matches
   -- and causes errors information loss
-   <> (eol' . parser)
+   <> (eol' . (parser <> id))
   where
     -- used only for parser generation
     eol' = toPrs eol

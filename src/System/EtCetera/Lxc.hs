@@ -3,7 +3,9 @@
 -- haskell replacement
 module System.EtCetera.Lxc
   ( emptyConfig
+  , emptyNetwork
   , LxcConfig(..)
+  , Network(..)
   , NetworkType(..)
   , parse
   , ParsingError

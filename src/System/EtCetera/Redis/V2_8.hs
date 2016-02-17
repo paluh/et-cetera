@@ -14,7 +14,6 @@ import           Control.Category (Category, id, (.))
 import           Control.Error (note)
 import           Control.Lens (DefName(..), Lens', lensField, lensRules, makeLensesWith, over, set,
                                view, (&), (.~), (??))
-import           Data.Char (toLower, toUpper)
 import           Data.List (foldl')
 import           Data.Monoid ((<>))
 import qualified Data.Set as Set
@@ -30,8 +29,7 @@ import           Text.Boomerang.String (anyChar, digit, lit, int, StringBoomeran
 import           System.EtCetera.Internal (Optional(..), repeatableScalar, scalar, vector)
 import           System.EtCetera.Internal.Prim (Ser(..), toPrs)
 import           System.EtCetera.Internal.Boomerangs (eol, ignoreWhen, noneOf, oneOf, parseString,
-                                                      whiteSpace, word, (<?>))
-import           System.EtCetera.Internal.Utils (capitalize)
+                                                      simpleSumBmg, whiteSpace, word, (<?>))
 
 type IP = String
 type Port = Int
@@ -104,12 +102,6 @@ memoryPolicyBmg =
 data LogLevel = Debug | Verbose | Notice | Warning
   deriving (Eq, Read, Show)
 
-simpleSumBmg :: (Show a, Read a) => [String] -> StringBoomerang r (a :- r)
-simpleSumBmg labels =
-    xpure (arg (:-) (read . capitalize))
-        (Just . arg (:-) (map toLower . show))
-    . (foldl' (<>) mempty . map word $ labels)
-
 logLevelBmg :: StringBoomerang r (LogLevel :- r)
 logLevelBmg = simpleSumBmg ["debug", "verbose", "notice", "warning"]
 
@@ -122,7 +114,7 @@ data SyslogFacility =
 syslogFacilityBmg :: StringBoomerang r (SyslogFacility :- r)
 syslogFacilityBmg =
   simpleSumBmg [ "user", "local0", "local1", "local2", "local3"
-               , "local4", "local5", "local6" ,   "local7"]
+               , "local4", "local5", "local6" , "local7"]
 
 data Save = Save Int Int | SaveReset
   deriving (Eq, Show)
@@ -433,7 +425,7 @@ parser =
   -- completely empty line (I don't want to handle this
   -- above with `manyl witeSpace` because always matches
   -- and causes errors information loss
-   <> (eol' . parser)
+   <> (eol' . (parser <> id))
   where
     -- used only for parser generation
     eol' = toPrs eol

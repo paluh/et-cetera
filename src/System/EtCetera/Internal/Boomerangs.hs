@@ -4,7 +4,8 @@ module System.EtCetera.Internal.Boomerangs where
 -- common boomerangs used by et-cetera library
 
 import           Control.Category ((.), id)
-import           Data.List (foldr)
+import           Data.Char (toLower)
+import           Data.List (foldl', foldr)
 import           Data.Monoid ((<>))
 import           Prelude hiding ((.), id)
 import           Text.Boomerang.Combinators (manyl, opt, push, rCons, rList, rList1, rNil)
@@ -15,6 +16,7 @@ import           Text.Boomerang.Prim (Boomerang(..), Parser(..), xmaph, xpure)
 import           Text.Boomerang.String (anyChar, char, lit, satisfy, StringBoomerang, StringError)
 import qualified Text.Boomerang.String
 import           System.EtCetera.Internal.Prim (Prs(..), runPrs)
+import           System.EtCetera.Internal.Utils (capitalize)
 
 oneOf :: String -> StringBoomerang r (Char :- r)
 oneOf l = satisfy (`elem` l)
@@ -135,4 +137,10 @@ parseString p =
           (prs tok pos)
 
 infix  0 <?>
+
+simpleSumBmg :: (Show a, Read a) => [String] -> StringBoomerang r (a :- r)
+simpleSumBmg labels =
+    xpure (arg (:-) (read . capitalize))
+        (Just . arg (:-) (map toLower . show))
+    . (foldl' (<>) mempty . map word $ labels)
 
