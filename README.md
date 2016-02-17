@@ -10,7 +10,7 @@ Really early stage...
 
 ## Under developement
 
-* Lxc (still buggy multiple network interfaces parsing and lxc.cgroups. handling)
+* Lxc (not finished lxc.cgroups. handling and error reporting)
 
 ## Still expermiental phase
 
