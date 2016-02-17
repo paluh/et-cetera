@@ -1,5 +1,7 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module System.EtCetera.Internal where
 
 import           Control.Category (id, (.))
@@ -35,11 +37,11 @@ import           System.EtCetera.Internal.Prim (Prs(..), Ser(..), toPrs, toSer)
 --  to not use Boomerang to hold them
 
 
-type SingleOptionParser config =
-  Prs StringError String (config :- ()) (config :- ())
+type SingleOptionParser config r =
+  Prs StringError String (config :- r) (config :- r)
 
-type Serializer config =
-  Ser String (config :- ()) (config :- ())
+type Serializer config r =
+  Ser String (config :- r) (config :- r)
 
 data Optional a = Present a | Missing
   deriving (Eq, Show)
@@ -54,39 +56,39 @@ instance GMonoid (Optional a) where
   gmappend = mappend
 
 extendSerializerWithScalarOption :: Lens' config (Optional a) ->
-                                    StringBoomerang (config :- ()) (a :- config :- ()) ->
-                                    Serializer config ->
-                                    Serializer config
+                                    StringBoomerang (config :- r) (a :- config :- r) ->
+                                    Serializer config r ->
+                                    Serializer config r
 extendSerializerWithScalarOption optionLens optionBoomerang serializer =
   serializer . valueExtractor . optionSerializer <> serializer
  where
   optionSerializer = toSer (optionBoomerang . eol)
   valueExtractor =
-    Ser (\(config :- ()) ->
+    Ser (\(config :- r) ->
       case view optionLens config of
-        (Present v) -> Just (id, v :- config :- ())
+        (Present v) -> Just (id, v :- config :- r)
         Missing     -> Nothing)
 
 extendSerializerWithVectorOption :: Lens' config [a] ->
-                                    StringBoomerang (config :- ()) ([a] :- config :- ()) ->
-                                    Serializer config ->
-                                    Serializer config
+                                    StringBoomerang (config :- r) ([a] :- config :- r) ->
+                                    Serializer config r ->
+                                    Serializer config r
 extendSerializerWithVectorOption optionLens optionBoomerang serializer =
   serializer . valueExtractor . optionSerializer <> serializer
  where
   optionSerializer = toSer (optionBoomerang . eol)
   valueExtractor =
     Ser
-      (\(config :- ()) ->
+      (\(config :- r) ->
         let ov = view optionLens config
         in (case ov of
           [] -> Nothing
-          otherwise -> Just (id, ov :- config :- ())))
+          otherwise -> Just (id, ov :- config :- r)))
 
 extendSerializerWithRepeatableScalar :: Lens' config [a] ->
-                                    StringBoomerang (config :- ()) (a :- config :- ()) ->
-                                    Serializer config ->
-                                    Serializer config
+                                    StringBoomerang (config :- r) (a :- config :- r) ->
+                                    Serializer config r ->
+                                    Serializer config r
 extendSerializerWithRepeatableScalar optionLens optionBoomerang serializer =
   serializer . valueExtractor . optionSerializer <> serializer
  where
@@ -95,9 +97,9 @@ extendSerializerWithRepeatableScalar optionLens optionBoomerang serializer =
     Ser (\(config :- r) -> Just (id, view optionLens config :- config :- r))
 
 addScalarOptionParser :: Lens' config (Optional a) ->
-                         StringBoomerang (config :- ()) (a :- config :- ()) ->
-                         SingleOptionParser config ->
-                         SingleOptionParser config
+                         StringBoomerang (config :- r) (a :- config :- r) ->
+                         SingleOptionParser config r ->
+                         SingleOptionParser config r
 addScalarOptionParser optionLens optionBoomerang optionsParser =
   optionsParser <> (valueSetter . toPrs optionBoomerang)
  where
@@ -105,9 +107,9 @@ addScalarOptionParser optionLens optionBoomerang optionsParser =
     Prs (return (\(v :- config :- r) -> set optionLens (Present v) config :- r))
 
 addVectorOptionParser :: Lens' config [a] ->
-                         StringBoomerang (config :- ()) ([a] :- config :- ()) ->
-                         SingleOptionParser config ->
-                         SingleOptionParser config
+                         StringBoomerang (config :- r) ([a] :- config :- r) ->
+                         SingleOptionParser config r ->
+                         SingleOptionParser config r
 addVectorOptionParser optionLens optionBoomerang optionsParser =
   optionsParser <> (valueSetter . toPrs optionBoomerang)
  where
@@ -115,9 +117,9 @@ addVectorOptionParser optionLens optionBoomerang optionsParser =
     Prs (return (\(v :- config :- r) -> set optionLens v config :- r))
 
 addRepeatableScalarParser :: Lens' config [a] ->
-                             StringBoomerang (config :- ()) (a :- config :- ()) ->
-                             SingleOptionParser config ->
-                             SingleOptionParser config
+                             StringBoomerang (config :- r) (a :- config :- r) ->
+                             SingleOptionParser config r ->
+                             SingleOptionParser config r
 addRepeatableScalarParser optionLens optionBoomerang optionsParser =
   (valueSetter . toPrs optionBoomerang) <> optionsParser
  where
@@ -125,9 +127,9 @@ addRepeatableScalarParser optionLens optionBoomerang optionsParser =
     Prs (return (\(v :- config :- r) -> over optionLens (v :) config :- r))
 
 vector :: Lens' config [a] ->
-          StringBoomerang (config :- ()) ([a] :- config :- ()) ->
-          (SingleOptionParser config, Serializer config) ->
-          (SingleOptionParser config, Serializer config)
+          StringBoomerang (config :- r) ([a] :- config :- r) ->
+          (SingleOptionParser config r, Serializer config r) ->
+          (SingleOptionParser config r, Serializer config r)
 vector optionLens optionBoomerang (p, s) =
   (p', s')
  where
@@ -135,9 +137,9 @@ vector optionLens optionBoomerang (p, s) =
   s' = extendSerializerWithVectorOption optionLens optionBoomerang s
 
 scalar :: Lens' config (Optional a) ->
-          StringBoomerang (config :- ()) (a :- config :- ()) ->
-          (SingleOptionParser config, Serializer config) ->
-          (SingleOptionParser config, Serializer config)
+          StringBoomerang (config :- r) (a :- config :- r) ->
+          (SingleOptionParser config r, Serializer config r) ->
+          (SingleOptionParser config r, Serializer config r)
 scalar optionLens optionBoomerang (p, s) =
   (p', s')
  where
@@ -145,9 +147,9 @@ scalar optionLens optionBoomerang (p, s) =
   s' = extendSerializerWithScalarOption optionLens optionBoomerang s
 
 repeatableScalar :: Lens' config [a] ->
-                    StringBoomerang (config :- ()) (a :- config :- ()) ->
-                    (SingleOptionParser config, Serializer config) ->
-                    (SingleOptionParser config, Serializer config)
+                    StringBoomerang (config :- r) (a :- config :- r) ->
+                    (SingleOptionParser config r, Serializer config r) ->
+                    (SingleOptionParser config r, Serializer config r)
 repeatableScalar optionLens optionBoomerang (p, s) =
   (p', s')
  where

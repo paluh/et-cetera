@@ -6,11 +6,11 @@ module System.EtCetera.LxcSpec where
 import           Control.Monad.Trans (liftIO)
 import           Data.List (intercalate)
 import           System.EtCetera.Internal (Optional(..))
-import           System.EtCetera.Lxc.Internal (emptyConfig, LxcConfig,
+import           System.EtCetera.Lxc.Internal (emptyConfig, emptyNetwork, LxcConfig,
                                                NetworkType(..), parse, serialize,
                                                SerializtionError(..), Switch(..),
                                                lxcAaProfile, lxcInclude,
-                                               lxcNetworkType, lxcRootfs,
+                                               lxcNetwork, lxcNetworkType, lxcRootfs,
                                                lxcStartDelay)
 import           Test.Hspec (describe, it, shouldBe, Spec)
 
@@ -72,7 +72,7 @@ suite = do
                                             , "/var/lib/lxc/custom"]
                              , lxcRootfs = Present "/mnt/rootfs.complex"
                              })
-  describe "System.EtCetera.Lxc serialize" $ -- do
+  describe "System.EtCetera.Lxc serialize" $ do
     it "serializes multiple options" $
       serialize (emptyConfig { lxcInclude = [ "/var/lib/lxc/lxc-common.conf"
                                             , "/var/lib/lxc/custom"]
@@ -82,3 +82,11 @@ suite = do
                            , "lxc.include=/var/lib/lxc/custom"
                            , "lxc.aa_profile=/mnt/rootfs.complex"
                            ])
+
+    it "serializes multiple correct networks" $
+      serialize
+        (emptyConfig
+           { lxcNetwork = [ emptyNetwork { lxcNetworkType = Present Macvlan }
+                          , emptyNetwork { lxcNetworkType = Present Veth }]
+           }) `shouldBe`
+        (Right "lxc.network.type=veth\nlxc.network.type=macvlan\n")

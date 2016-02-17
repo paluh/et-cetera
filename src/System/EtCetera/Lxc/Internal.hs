@@ -248,16 +248,14 @@ ws = somel whiteSpace
  where
   nScalar :: Lens' Network (Optional a) ->
              (forall r. StringBoomerang r (a :- r)) ->
-             (SingleOptionParser LxcConfig, Serializer Network) ->
-             (SingleOptionParser LxcConfig, Serializer Network)
+             (SingleOptionParser LxcConfig r, Serializer Network r) ->
+             (SingleOptionParser LxcConfig r, Serializer Network r)
   nScalar lens ob (prs, ser) =
     (purePrs (\(value :- lxc :- r) -> over lxcNetworkLens (setValue lens value) lxc :- r) . toPrs ob <> prs,
      extendSerializerWithScalarOption lens ob ser)
 
   nOption l b = lit l . opt ws . lit "=" . opt ws . b
 
-  setValue :: Lens' Network (Optional a) -> a -> [Network] -> [Network]
-  -- a little bit cheating here ;-)
   setValue lens value [] = [set lens (Present value) emptyNetwork]
   setValue lens value (n:ns) = set lens (Present value) n : ns
 
@@ -274,21 +272,26 @@ pureSer f =
 pop :: Ser String r (a :- r)
 pop = pureSer (\(a :- r) -> Just r)
 
-networks :: Ser String (LxcConfig :- r) (LxcConfig :- r)
-networks =
-  -- networksSer . (pureSer p)
-  undefined
+listSer :: Ser tok r (a :- r) -> Ser tok r ([a] :- r)
+listSer s =
+  Ser (listSer' s)
  where
-  p (lxcConfig@(LxcConfig{lxcNetwork=ns}) :- r) = Just (id, ns :- lxcConfig :- r)
-  s = Ser p
-  networksSer =
-    Ser (l (networkSerializer . pop))
-   where
-    l (Ser s) ([] :- r) = Just (id, r)
-    l (Ser s) ((x:xs) :- r) = do
-      (t2t, r') <- s (x :- r)
-      (t2t', r'') <- l (Ser s) (xs :- r')
-      return (t2t' . t2t, r'')
+  listSer' (Ser s) ([] :- r) = Just (id, r)
+  listSer' (Ser s) ((x:xs) :- r) = do
+    (t2t, r') <- s (x :- r)
+    (t2t', r'') <- listSer' (Ser s) (xs :- r')
+    return (t2t' . t2t, r'')
+
+-- XXX: fail when there is missing networkType in any of interaces coniguration
+networksSerializer :: Ser String (LxcConfig :- r) (LxcConfig :- r)
+networksSerializer =
+  extractNetworks . networksSer
+ where
+  extractNetworks = pureSer (\(lxcConfig @ LxcConfig { lxcNetwork=ns } :- r) -> Just (ns :- lxcConfig :- r))
+  networksSer :: forall r'. Ser String r' ([Network] :- r')
+  networksSer = listSer (networkSerializer . pop)
+
+serializer = baseOptionsSerializer . networksSerializer
 
 parser =
   -- comment
@@ -324,4 +327,4 @@ serialize :: LxcConfig -> Either SerializtionError String
 serialize redisConfig =
   note SerializtionError . fmap (($ "") . fst) . s $ (redisConfig :- ())
  where
-  Ser s = baseOptionsSerializer
+  Ser s = serializer
