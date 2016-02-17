@@ -1,6 +1,6 @@
 # et-cetera
 
-Experimental parsers/serializers for some *nix system and services configuration files.
+Experimental parsers/serializers for some *nix system and services configuration files written in haskell.
 
 Really early stage...
 
