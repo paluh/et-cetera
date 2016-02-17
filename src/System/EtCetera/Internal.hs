@@ -66,7 +66,7 @@ extendSerializerWithScalarOption optionLens optionBoomerang serializer =
   valueExtractor =
     Ser (\(config :- r) ->
       case view optionLens config of
-        (Present v) -> Just (id, v :- config :- r)
+        (Present v) -> Just (id, v :- set optionLens Missing config :- r)
         Missing     -> Nothing)
 
 extendSerializerWithVectorOption :: Lens' config [a] ->
@@ -83,7 +83,7 @@ extendSerializerWithVectorOption optionLens optionBoomerang serializer =
         let ov = view optionLens config
         in (case ov of
           [] -> Nothing
-          otherwise -> Just (id, ov :- config :- r)))
+          otherwise -> Just (id, ov :- set optionLens [] config :- r)))
 
 extendSerializerWithRepeatableScalar :: Lens' config [a] ->
                                     StringBoomerang (config :- r) (a :- config :- r) ->
@@ -94,7 +94,7 @@ extendSerializerWithRepeatableScalar optionLens optionBoomerang serializer =
  where
   optionSerializer = toSer (rList (optionBoomerang . eol))
   valueExtractor =
-    Ser (\(config :- r) -> Just (id, view optionLens config :- config :- r))
+    Ser (\(config :- r) -> Just (id, view optionLens config :- set optionLens [] config :- r))
 
 addScalarOptionParser :: Lens' config (Optional a) ->
                          StringBoomerang (config :- r) (a :- config :- r) ->

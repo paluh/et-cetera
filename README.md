@@ -1,6 +1,6 @@
 # et-cetera
 
-Experimental parsers/serializers for some *nix system and services configuration files written in haskell.
+Experimental parsers/serializers for some \*nix system and services configuration files written in haskell.
 
 Really early stage...
 
@@ -10,7 +10,11 @@ Really early stage...
 
 ## Under developement
 
-* Lxc (not finished lxc.cgroups. handling and error reporting)
+* Lxc:
+
+    - not finished lxc.cgroups. handling
+
+    - missing serialization error reporting
 
 ## Still expermiental phase
 

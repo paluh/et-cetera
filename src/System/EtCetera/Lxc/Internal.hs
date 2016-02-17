@@ -312,12 +312,15 @@ consSer =
 
 listSer r = manylSer (consSer . r) . nilSer
 
--- XXX: fail when there is missing networkType in any of interaces coniguration
+-- XXX: fail when there is missing networkType in any of interfaces coniguration
 networksSerializer :: Ser String (LxcConfig :- r) (LxcConfig :- r)
 networksSerializer =
   extractNetworks . networksSer
  where
-  extractNetworks = pureSer (\(lxcConfig @ LxcConfig { lxcNetwork=ns } :- r) -> Just (ns :- lxcConfig :- r))
+  extractNetworks =
+    pureSer s
+   where
+    s (lxcConfig @ LxcConfig { lxcNetwork=ns } :- r) = Just (ns :- set lxcNetworkLens [] lxcConfig :- r)
   networksSer :: forall r'. Ser String r' ([Network] :- r')
   networksSer = listSer (networkSerializer . pop)
 
@@ -358,112 +361,3 @@ serialize redisConfig =
   note SerializtionError . fmap (($ "") . fst) . s $ (redisConfig :- ())
  where
   Ser s = serializer
-
-
--- Right
---   (LxcConfig
---      { lxcAaAllowIncomplete = Missing
---      , lxcAaProfile = Missing
---      , lxcArch = Missing
---      , lxcAutodev = Missing
---      , lxcCapDrop = Missing
---      , lxcCapKeep = Missing
---      , lxcCgroup = Missing
---      , lxcConsole = Missing
---      , lxcConsoleLogfile = Missing
---      , lxcDevttydir = Missing
---      , lxcEnvironment = []
---      , lxcEphemeral = Missing
---      , lxcGroup = Missing
---      , lxcHaltsignal = Missing
---      , lxcHook = Missing
---      , lxcHookAutodev = Missing
---      , lxcHookClone = Missing
---      , lxcHookDestroy = Missing
---      , lxcHookMount = Missing
---      , lxcHookPostStop = Missing
---      , lxcHookPreMount = Missing
---      , lxcHookPreStart = Missing
---      , lxcHookStart = Missing
---      , lxcHookStop = Missing
---      , lxcIdMap = Missing
---      , lxcInclude = []
---      , lxcInitCmd = Missing
---      , lxcInitGid = Missing
---      , lxcInitUid = Missing
---      , lxcKmsg = Missing
---      , lxcLogfile = Missing
---      , lxcLoglevel = Missing
---      , lxcMonitorUnshare = Missing
---      , lxcMount = Missing
---      , lxcMountAuto = Missing
---      , lxcMountEntry = Missing
---      , lxcNetwork = [ Network
---                           { lxcNetworkType = Present Macvlan
---                           , lxcNetworkFlags = Missing
---                           , lxcNetworkHwaddr = Missing
---                           , lxcNetworkIpv4 = Missing
---                           , lxcNetworkIpv4Gateway = Missing
---                           , lxcNetworkIpv6 = Missing
---                           , lxcNetworkIpv6Gateway = Missing
---                           , lxcNetworkLink = Missing
---                           , lxcNetworkMacvlanMode = Missing
---                           , lxcNetworkMtu = Missing
---                           , lxcNetworkName = Missing
---                           , lxcNetworkScriptDown = Missing
---                           , lxcNetworkScriptUp = Missing
---                           , lxcNetworkVethPair = Missing
---                           , lxcNetworkVlanId = Missing
---                           }
---                     , Network
---                       { lxcNetworkType = Present Veth
---                       , lxcNetworkFlags = Missing
---                       , lxcNetworkHwaddr = Missing
---                       , lxcNetworkIpv4 = Missing
---                       , lxcNetworkIpv4Gateway = Missing
---                       , lxcNetworkIpv6 = Missing
---                       , lxcNetworkIpv6Gateway = Missing
---                       , lxcNetworkLink = Missing
---                       , lxcNetworkMacvlanMode = Missing
---                       , lxcNetworkMtu = Missing
---                       , lxcNetworkName = Present "eth0"
---                       , lxcNetworkScriptDown = Missing
---                       , lxcNetworkScriptUp = Missing
---                       , lxcNetworkVethPair = Missing
---                       , lxcNetworkVlanId = Missing
---                       }
---                     , Network
---                       { lxcNetworkType = Missing
---                       , lxcNetworkFlags = Missing
---                       , lxcNetworkHwaddr = Missing
---                       , lxcNetworkIpv4 = Missing
---                       , lxcNetworkIpv4Gateway = Missing
---                       , lxcNetworkIpv6 = Missing
---                       , lxcNetworkIpv6Gateway = Missing
---                       , lxcNetworkLink = Missing
---                       , lxcNetworkMacvlanMode = Missing
---                       , lxcNetworkMtu = Missing
---                       , lxcNetworkName = Present "eth1"
---                       , lxcNetworkScriptDown = Missing
---                       , lxcNetworkScriptUp = Missing
---                       , lxcNetworkVethPair = Missing
---                       , lxcNetworkVlanId = Missing
---                       }
---                     ]
---      , lxcPivotdir = Missing
---      , lxcPts = Missing
---      , lxcRebootsignal = Missing
---      , lxcRootfs = Missing
---      , lxcRootfsMount = Missing
---      , lxcRootfsOptions = Missing
---      , lxcSeConstring = Missing
---      , lxcSeccomp = Missing
---      , lxcStartAuto = Missing
---      , lxcStartDelay = Missing
---      , lxcStartOrder = Missing
---      , lxcStopsignal = Missing
---      , lxcTty = Missing
---      , lxcUtsname = Missing
---      })
--- 
--- 
